@@ -83,6 +83,9 @@ class Features:
         for k, v in other_features.items():
             self._features[k] = np.asarray(atleast_2d(v, insert_axis=1))
         
+        # HACK: assumption that in the neighborhoods, we only use coeffs
+        self.X_tree = np.hstack((self.bp, self.rp))
+        
         X = np.hstack((self.bp, self.rp) + tuple(self._features.values()))
         self.X = X
         self.names = np.concatenate((
