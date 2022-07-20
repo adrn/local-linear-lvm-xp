@@ -43,8 +43,13 @@ class ParameterState:
 
 class LinearLVM:
 
-    def __init__(self, X, y, X_err, y_err, B, alpha, verbose=False):
+    def __init__(self, X, y, X_err, y_err, B, alpha, beta, verbose=False):
         """
+        N - stars
+        R - features
+        Q - labels
+        D - latents
+
         Parameters
         ----------
         X : array-like
@@ -59,6 +64,8 @@ class LinearLVM:
             shape `(Q, D)` matrix translating latents to labels.
         alpha : numeric
             regularization strength; use the source, Luke.
+        beta : numeric
+            burp.
         """
         self.verbose = verbose
 
@@ -126,6 +133,7 @@ class LinearLVM:
             )
 
         self.alpha = float(alpha)
+        self.beta = float(beta)
 
         # Regularization matrix:
         self.Lambda = self.alpha * np.diag(self._z_fit_mask.astype(int))
@@ -237,7 +245,8 @@ class LinearLVM:
         return (
             0.5 * jnp.sum(chi_X ** 2) +
             0.5 * jnp.sum(chi_y ** 2) +
-            0.5 * self.alpha * jnp.sum(pars.z[:, self._z_fit_mask] ** 2)
+            0.5 * self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
+            0.5 * self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2, axis=0)
         )
 
     def __call__(self, p):
