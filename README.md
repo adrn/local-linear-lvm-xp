@@ -1,6 +1,6 @@
-# Joaquin XP
+# Local Linear Latent Variable Models
 
-Local linear models to get stellar parameters from Gaia XP spectra
+To get stellar parameters from Gaia XP spectra
 
 ## Authors
 - [Adrian Price-Whelan](https://github.com/adrn) (Flatiron)
