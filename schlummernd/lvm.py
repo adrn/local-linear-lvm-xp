@@ -6,6 +6,8 @@ from typing import Annotated, Any, Dict, get_args
 import jax.numpy as jnp
 import numpy as np
 
+__all__ = ['ParameterState', 'LinearLVM']
+
 
 def _model_linear(mu, A, x):
     return mu[None] + x @ A.T
