@@ -246,7 +246,7 @@ class LinearLVM:
             0.5 * jnp.sum(chi_X ** 2) +
             0.5 * jnp.sum(chi_y ** 2) +
             0.5 * self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
-            0.5 * self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2, axis=0)
+            0.5 * self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2)
         )
 
     def __call__(self, p):
