@@ -136,7 +136,7 @@ class Features:
                     (g.bp_err[:, 1:j] / g.bp[:, 1:j]) ** 2
                     + (g.bp_err[:, 0:1] / g.bp[:, 0:1]) ** 2
                 )
-                * bp
+                * np.abs(bp)
             )
             n_xp += bp.shape[1]
 
@@ -151,7 +151,7 @@ class Features:
                     (g.rp_err[:, 1:j] / g.rp[:, 1:j]) ** 2
                     + (g.rp_err[:, 0:1] / g.rp[:, 0:1]) ** 2
                 )
-                * rp
+                * np.abs(rp)
             )
             n_xp += rp.shape[1]
 
