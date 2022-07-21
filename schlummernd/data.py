@@ -164,10 +164,22 @@ class Features:
         )
 
     def slice_bp(self, K):
-        return self.__class__(self.bp[:, :K], self.rp, **self._features)
+        return self.__class__(
+            self.bp[:, :K],
+            self.bp_err[:, :K],
+            self.rp,
+            self.rp_err,
+            **self._features,
+        )
 
     def slice_rp(self, K):
-        return self.__class__(self.bp, self.rp[:, :K], **self._features)
+        return self.__class__(
+            self.bp,
+            self.bp_err,
+            self.rp[:, :K],
+            self.rp_err[:, :K],
+            **self._features,
+        )
 
     def __len__(self):
         return self.X.shape[0]
@@ -178,6 +190,8 @@ class Features:
 
         return self.__class__(
             self.bp[slc],
+            self.bp_err[slc],
             self.rp[slc],
-            **{k: v[slc] for k, v in self._features.items()},
+            self.rp_err[slc],
+            **{k: (v[0][slc], v[1][slc]) for k, v in self._features.items()},
         )
