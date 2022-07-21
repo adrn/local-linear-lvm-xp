@@ -6,8 +6,6 @@ from typing import Annotated, Any, Dict, get_args
 import jax.numpy as jnp
 import numpy as np
 
-__all__ = ['ParameterState', 'LinearLVM']
-
 
 def _model_linear(mu, A, x):
     return mu[None] + x @ A.T
@@ -43,7 +41,8 @@ class ParameterState:
 
 class LinearLVM:
 
-    def __init__(self, X, y, X_err, y_err, B, alpha, beta, verbose=False):
+    def __init__(self, X, y, X_err, y_err, B, alpha, beta,
+                 verbose=False, rng=None):
         """
         N - stars
         R - features
@@ -68,6 +67,9 @@ class LinearLVM:
             burp.
         """
         self.verbose = verbose
+        if rng is None:
+            rng = np.random.default_rng()
+        self.rng = rng
 
         self.X = jnp.array(X)
         self.y = jnp.array(y)
@@ -125,7 +127,7 @@ class LinearLVM:
             print(f"B fit elements = {self._B_fit_mask}")
 
         # Now assess which latents to fit:
-        self._z_fit_mask = jnp.any(self._B_fit_mask, axis=0)
+        self._z_fit_mask = jnp.all(self.B == 0, axis=0)
         if verbose:
             print(
                 f"using {self._z_fit_mask.sum()} unconstrained elements of z, "
@@ -176,14 +178,16 @@ class LinearLVM:
             # TODO: magic numberz
             TINY = 1e-1  # MAGIC
             sigma = np.std(state['z']) + TINY
-            state['z'] += np.random.normal(0, TINY * sigma, size=state['z'].shape)
+            state['z'] += self.rng.normal(0, TINY * sigma, size=state['z'].shape)
 
         if 'A' not in state:
             A = np.zeros((self.sizes['R'], self.sizes['D']))
-            state['A'] = A.copy()
-            for j, chi in enumerate(self._chi_X(state['mu_X'], state['A'], state['z']).T):
+            chi_X = self._chi_X(state['mu_X'], A, state['z'])
+
+            state['A'] = A
+            for j, chi in enumerate(chi_X.T):
                 state['A'][j] = np.linalg.lstsq(
-                    state['z'] * self._X_ivar[:, j][None].T,
+                    state['z'] * np.sqrt(self._X_ivar[:, j][None].T),
                     chi, rcond=None
                 )[0]
 
@@ -242,11 +246,11 @@ class LinearLVM:
         chi_X = self._chi_X(pars.mu_X, pars.A, pars.z)
         chi_y = self._chi_y(pars.mu_y, pars.B, pars.z)
 
-        return (
-            0.5 * jnp.sum(chi_X ** 2) +
-            0.5 * jnp.sum(chi_y ** 2) +
-            0.5 * self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
-            0.5 * self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2)
+        return 0.5 * (
+            jnp.sum(chi_X ** 2) +
+            jnp.sum(chi_y ** 2) +
+            self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
+            self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2)
         )
 
     def __call__(self, p):
