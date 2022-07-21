@@ -1,2 +1,6 @@
 data
 */version.py
+
+.eggs
+dist
+build
