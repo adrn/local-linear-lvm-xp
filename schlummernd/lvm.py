@@ -148,48 +148,73 @@ class LinearLVM:
 
     def initialize_par_state(self, **state):
         """
-        TODO: this is a little hacky
+        N - stars
+        R - features
+        Q - labels
+        D - latents
+
+        mu_X : (R, )
+        mu_y : (Q, )
+        z : (N, D)
+        A : (R, D)
+        B : (Q, D)
+
         """
 
         # Initialize the means using invvar weighted means
         # TODO: could do sigma-clipping here to be more robust
         if 'mu_X' not in state:
             state['mu_X'] = (
-                jnp.sum(self.X * self._X_ivar, axis=0) /
-                jnp.sum(self._X_ivar, axis=0)
+                np.sum(self.X * self._X_ivar, axis=0) /
+                np.sum(self._X_ivar, axis=0)
             )
 
         if 'mu_y' not in state:
             state['mu_y'] = (
-                jnp.sum(self.y * self._y_ivar, axis=0) /
-                jnp.sum(self._y_ivar, axis=0)
+                np.sum(self.y * self._y_ivar, axis=0) /
+                np.sum(self._y_ivar, axis=0)
             )
 
         if 'z' not in state:
             # First hack: Start with the pseudo-inverse of `B`.
-            # BUG: Doesn't use weights.
-            state['z'] = jnp.linalg.lstsq(
-                self.B,
-                (self.y - state['mu_y'][None, :]).T,
-                rcond=None
-            )[0].T
+            state['z'] = np.zeros((self.sizes['N'], self.sizes['D']))
+            chi = (self.y - state['mu_y'][None]) / self.y_err
+            for n in range(self.sizes['N']):
+                state['z'][n] = np.linalg.lstsq(
+                    self.B / self.y_err[n][:, None],
+                    chi[n],
+                    rcond=None
+                )[0].T
 
-            # Second hack: Add noise.
-            # TODO: magic numberz
-            TINY = 1e-1  # MAGIC
-            sigma = np.std(state['z']) + TINY
-            state['z'] += self.rng.normal(0, TINY * sigma, size=state['z'].shape)
+            # Second hack: Add some noise to unconstrained z components
+            sigma = np.std(state['z'][:, ~self._z_fit_mask], axis=0)
+            scale = 0.1  # MAGIC NUMBER
+            state['z'][:, ~self._z_fit_mask] += self.rng.normal(
+                0,
+                scale * sigma,
+                size=(self.sizes['N'], (~self._z_fit_mask).sum())
+            )
+
+            state['z'][:, self._z_fit_mask] = self.rng.normal(
+                0,
+                scale * np.mean(sigma),
+                size=(self.sizes['N'], self._z_fit_mask.sum())
+            )
 
         if 'A' not in state:
-            A = np.zeros((self.sizes['R'], self.sizes['D']))
-            chi_X = self._chi_X(state['mu_X'], A, state['z'])
+            state['A'] = np.zeros((self.sizes['R'], self.sizes['D']))
+            chi = self._chi_X(state['mu_X'], state['A'], state['z'])
 
-            state['A'] = A
-            for j, chi in enumerate(chi_X.T):
-                state['A'][j] = np.linalg.lstsq(
-                    state['z'] * np.sqrt(self._X_ivar[:, j][None].T),
-                    chi, rcond=None
+            for r in range(self.sizes['R']):
+                state['A'][r] = np.linalg.lstsq(
+                    state['z'] / self.X_err[:, r:r+1],
+                    chi[:, r],
+                    rcond=None
                 )[0]
+
+        renorm = np.sqrt(np.sum(state['A'][:, self._z_fit_mask]**2, axis=0))
+        state['A'][:, self._z_fit_mask] = state['A'][:, self._z_fit_mask] / renorm[None, :]
+        state['z'][:, self._z_fit_mask] = state['z'][:, self._z_fit_mask] * renorm[None, :]
 
         if 'B' not in state:
             # TODO: implement this
@@ -232,6 +257,7 @@ class LinearLVM:
             if name == 'B':
                 # TODO: deal with note above
                 continue
+
             val = getattr(par_state, name).flatten()
             arrs.append(val)
         return jnp.concatenate(arrs)
@@ -249,8 +275,8 @@ class LinearLVM:
         return 0.5 * (
             jnp.sum(chi_X ** 2) +
             jnp.sum(chi_y ** 2) +
-            self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
-            self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2)
+            self.alpha * jnp.sum(pars.z[:, self._z_fit_mask] ** 2) +
+            self.beta * jnp.sum(pars.A[:, self._z_fit_mask] ** 2)
         )
 
     def __call__(self, p):
@@ -268,7 +294,7 @@ class LinearLVM:
 
         y_hat = np.zeros((M, self.sizes['Q']))
 
-        chi = (X - par_state.mu_X[None, :]) / X_err
+        chi = (X - par_state.mu_X[None]) / X_err
         for i, dx in enumerate(chi):
             M = par_state.A / X_err[i][:, None]
             z = np.linalg.lstsq(M, dx, rcond=None)[0]
