@@ -7,3 +7,9 @@
 ## License
 
 MIT. Check the LICENSE.
+
+## Notes
+
+This is conceptually related to things developed in
+[joaquin](https://github.com/adrn/joaquin) and
+[apogee-dr17-distances](https://github.com/adrn/apogee-dr17-distances).
