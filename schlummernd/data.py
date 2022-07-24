@@ -11,7 +11,7 @@ import numpy as np
 from pyia import GaiaData
 from gala.util import atleast_2d
 
-__all__ = ["load_data", "Features"]
+__all__ = ["load_data", "Features", "Labels"]
 
 # ====
 # Data
