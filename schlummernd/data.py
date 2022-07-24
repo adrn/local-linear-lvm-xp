@@ -195,3 +195,89 @@ class Features:
             self.rp_err[slc],
             **{k: (v[0][slc], v[1][slc]) for k, v in self._features.items()},
         )
+
+
+class Labels:
+
+    def __init__(self):
+        self.vals = {}
+        self.errs = {}
+        self.labels = {}
+        self._shape = None
+        self._percs = None
+        self._y = None
+        self._y_err = None
+
+    def add_label(self, name, value, err, label=None):
+        if label is None:
+            label = name
+
+        value = np.array(value)
+        err = np.array(err)
+
+        if len(self.vals) == 0:
+            self._shape = value.shape
+
+        if value.shape != self._shape or err.shape != self._shape:
+            raise ValueError("Invalid shape.")
+
+        self.vals[name] = value
+        self.errs[name] = err
+        self.labels[name] = label
+
+    def _transform(self, vals, err=False):
+        if self._percs is None:
+            self._percs = {}
+            for name, val in self.vals.items():
+                self._percs[name] = np.nanpercentile(val, [16, 50, 84])
+
+        new_vals = {}
+        for name, perc in self._percs.items():
+            scale = perc[2] - perc[0]
+            new_vals[name] = vals[name] / scale
+            if not err:
+                new_vals[name] = new_vals[name] - perc[1] / scale
+
+        return new_vals
+
+    def _untransform(self, ys, err=False):
+        if self._percs is None:
+            self._percs = {}
+            for name, val in self.vals.items():
+                self._percs[name] = np.nanpercentile(val, [16, 50, 84])
+
+        new_vals = {}
+        for i, (name, perc) in enumerate(self._percs.items()):
+            scale = perc[2] - perc[0]
+            new_vals[name] = ys[:, i] * scale
+            if not err:
+                new_vals[name] = new_vals[name] + perc[1]
+
+        return new_vals
+
+    @property
+    def y(self):
+        if self._y is None or self._y.shape[1] != len(self.vals):
+            new_vals = self._transform(self.vals)
+            self._y = np.stack(list(new_vals.values())).T.astype(np.float64)
+        return self._y
+
+    @property
+    def y_err(self):
+        if self._y_err is None or self._y_err.shape[1] != len(self.vals):
+            new_errs = self._transform(self.errs, err=True)
+            self._y_err = np.abs(np.stack(list(new_errs.values())).T).astype(np.float64)
+        return self._y_err
+
+    def __getitem__(self, slc):
+        if isinstance(slc, int):
+            slc = slice(slc, slc + 1)
+
+        new_obj = self.__class__()
+        for name in self._ys:
+            new_obj.add_label(
+                name,
+                self.vals[name][slc],
+                self.errs[name][slc],
+                self.labels[name]
+            )
