@@ -1,6 +1,4 @@
-# Local Linear Latent Variable Models
-
-To get stellar parameters from Gaia XP spectra
+# Schlummernd: Local Linear Latent Variable Models of Gaia BP/RP Spectra
 
 ## Authors
 - [Adrian Price-Whelan](https://github.com/adrn) (Flatiron)
