@@ -11,55 +11,7 @@ import numpy as np
 from pyia import GaiaData
 from gala.util import atleast_2d
 
-__all__ = ["load_data", "Features", "Labels"]
-
-# ====
-# Data
-# ----
-
-# The output of notebooks/Assemble-data.ipynb
-default_data_path = pathlib.Path(__file__).absolute().parent / "../data"
-default_data_path = (
-    default_data_path.resolve() / "apogee-dr17-x-gaia-dr3-xp.fits"
-)
-
-
-def load_data(filters="default", data_path=None):
-    """
-    Load the APOGEE DR17 x Gaia DR3 cross-match parent sample.
-
-    By default, this function returns a subset of the data that matches our fiducial set
-    of quality cuts and sample criteria. To disable this (i.e. to get the full
-    cross-matched sample), set `filters=None`. Alternatively, you can pass in a
-    dictionary of key-value pairs where the keys are column names and the values are
-    ranges to subselect the data to. So, for example, you could pass in
-    `filters={'TEFF': (3500, 4500)}` to subselect to only stars with APOGEE TEFF between
-    3500 and 4500 K. Pass ``None`` as a value if you want to only set a lower or upper
-    bound.
-
-    Parameters
-    ----------
-    filters : str, dict-like, ``None`` (optional)
-        See description above for ways to use this parameter.
-    data_path : path-like (optional)
-        To override the default data path location, pass a full file path here.
-    """
-
-    if data_path is None:
-        data_path = default_data_path
-    gall = GaiaData(data_path)
-
-    if filters is None or filters is False:
-        # Disable filters: return
-        return gall
-
-    elif filters == "default":
-        # Our default dataset is the upper red giant branch (above the red clump)
-        filters = dict(TEFF=(3000, 5200), LOGG=(-0.5, 2.2))
-        return load_data(filters, data_path)
-
-    else:
-        return gall.filter(**filters)
+__all__ = ["Features", "Labels"]
 
 
 class Features:

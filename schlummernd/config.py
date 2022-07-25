@@ -4,6 +4,7 @@ from typing import Union
 
 # Third-party
 from pydantic import BaseModel
+from pyia import GaiaData
 import yaml
 
 __all__ = ['Config']
@@ -64,3 +65,44 @@ class Config(BaseModel, validate_assignment=True):
 
                 # Make sure path exists:
                 v.mkdir(exist_ok=True)
+
+    def load_training_data(self, filters="default", filename=None):
+        """
+        Load the APOGEE DR17 x Gaia DR3 cross-match parent sample.
+
+        By default, this function returns a subset of the data that matches our fiducial
+        set of quality cuts and sample criteria. To disable this (i.e. to get the full
+        cross-matched sample), set `filters=None`. Alternatively, you can pass in a
+        dictionary of key-value pairs where the keys are column names and the values are
+        ranges to subselect the data to. So, for example, you could pass in
+        `filters={'TEFF': (3500, 4500)}` to subselect to only stars with APOGEE TEFF
+        between 3500 and 4500 K. Pass ``None`` as a value if you want to only set a
+        lower or upper bound.
+
+        Parameters
+        ----------
+        filters : str, dict-like, ``None`` (optional)
+            See description above for ways to use this parameter.
+        filename : path-like (optional)
+            To override the default data file location, pass a full file path here.
+        """
+
+        if filename is None:
+            filename = self.data_path / "apogee-dr17-x-gaia-dr3-xp.fits"
+        g = GaiaData(filename)
+
+        if filters is None or filters is False:
+            # Disable filters: return
+            return g
+
+        elif filters == "default":
+            # Our default dataset are things with measured APOGEE stellar parameters
+            filters = dict(
+                TEFF=(2500, 10000),
+                LOGG=(-0.6, 6),
+                M_H=(-2.5, 1)
+            )
+            return self.load_training_data(filters, filename=filename)
+
+        else:
+            return g.filter(**filters)
