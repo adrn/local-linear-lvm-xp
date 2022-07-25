@@ -108,7 +108,8 @@ class Features:
             self.bp_err[:, :K],
             self.rp,
             self.rp_err,
-            **self._features,
+            **{k: (self._features[k], self._features_err[k])
+               for k in self._features},
         )
 
     def slice_rp(self, K):
@@ -117,7 +118,8 @@ class Features:
             self.bp_err,
             self.rp[:, :K],
             self.rp_err[:, :K],
-            **self._features,
+            **{k: (self._features[k], self._features_err[k])
+               for k in self._features},
         )
 
     def __len__(self):
@@ -132,8 +134,10 @@ class Features:
             self.bp_err[slc],
             self.rp[slc],
             self.rp_err[slc],
-            **{k: (v[0][slc], v[1][slc])
-               for k, v in self._features.items()},
+            **{
+                k: (self._features[k][slc], self._features_err[k][slc])
+                for k in self._features
+            },
         )
 
 
