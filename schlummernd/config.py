@@ -22,7 +22,8 @@ class Config(BaseModel, validate_assignment=True):
     # The maximum size of a neighborhood used for training
     max_neighborhood_size: int = 4096
 
-    # The number of K-fold splits to do within each neighborhood for assessing uncertainty
+    # The number of K-fold splits to do within each neighborhood for assessing
+    # uncertainty
     Kfold_K: int = 8
 
     # Random number seed
@@ -37,7 +38,7 @@ class Config(BaseModel, validate_assignment=True):
         filename : path-like
             The full path to a YAML config file.
         """
-        filename = pathlib.Path(filename).expanduser().absolute()
+        filename = pathlib.Path(filename).expanduser().resolve()
         if not filename.exists():
             raise IOError(f"Config file {filename!s} does not exist.")
 
@@ -59,7 +60,7 @@ class Config(BaseModel, validate_assignment=True):
         # Normalize paths:
         for k, v in self.dict().items():
             if isinstance(v, pathlib.Path):
-                setattr(self, k, v.expanduser().absolute())
+                setattr(self, k, v.expanduser().resolve())
 
                 # Make sure path exists:
                 v.mkdir(exist_ok=True)
