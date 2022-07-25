@@ -85,7 +85,7 @@ def colored_corner(
                 np.linspace(*np.nanpercentile(X[:, k], [5, 95]), bins)
                 for k in range(X.shape[1])
             ]
-        except ValueError:
+        except (ValueError, TypeError):
             bins = list(bins)
 
         if len(bins) != X.shape[1]:
