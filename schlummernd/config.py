@@ -45,7 +45,7 @@ class Config(BaseModel, validate_assignment=True):
         with open(filename, 'r') as f:
             vals = yaml.safe_load(f.read())
 
-        vals.setdefault('output_path', filename.parent)
+        vals.setdefault('output_path', filename.parent / 'output')
         return cls(**vals)
 
     def __init__(self, *args, **kwargs):
