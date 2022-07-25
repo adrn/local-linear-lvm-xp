@@ -1,0 +1,5 @@
+# See: schlummernd/config.py for definitions
+Kfold_K: 8
+max_neighborhood_size: 4096
+n_neighborhood_pca_components: 8
+seed: 42
