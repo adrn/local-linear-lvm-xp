@@ -12,9 +12,9 @@ __all__ = ['Config']
 class Config(BaseModel, validate_assignment=True):
 
     # The paths to write any output (cache files and plots)
-    output_path: Union[str, pathlib.Path]
-    data_path: Union[str, pathlib.Path] = None  # default: output_path / 'data'
-    plot_path: Union[str, pathlib.Path] = None  # default: output_path / 'plots'
+    output_path: Union[pathlib.Path, str]
+    data_path: Union[pathlib.Path, str] = None  # default: output_path / 'data'
+    plot_path: Union[pathlib.Path, str] = None  # default: output_path / 'plots'
 
     # The number of PCA components to use when defining neighborhoods
     n_neighborhood_pca_components: int
