@@ -146,7 +146,7 @@ def colored_corner(
                         X[:, i + 1],
                         color_by,
                         statistic=statistic,
-                        bins=(bins[j], bins[i])
+                        bins=(bins[j], bins[i + 1])
                     )
                     cs = ax.pcolormesh(
                         stat.x_edge, stat.y_edge, stat.statistic.T, **style
