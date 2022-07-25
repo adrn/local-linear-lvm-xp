@@ -1,14 +1,5 @@
-"""
-Currently a bag of helper functionality.
-TODO: split up and turned into a proper package.
-"""
-
-# Standard library
-import pathlib
-
 # Third-party
 import numpy as np
-from pyia import GaiaData
 from gala.util import atleast_2d
 
 __all__ = ["Features", "Labels"]
@@ -40,27 +31,29 @@ class Features:
         self.rp = np.asarray(atleast_2d(rp_rp0, insert_axis=1))
         self.rp_err = np.asarray(atleast_2d(rp_rp0_err, insert_axis=1))
 
-        self._bp_names = np.array(
-            [f"BP[{i}]/BP[0]" for i in range(1, self.bp.shape[1] + 1)]
-        )
-        self._rp_names = np.array(
-            [f"RP[{i}]/RP[0]" for i in range(1, self.rp.shape[1] + 1)]
-        )
+        self._bp_names = np.array([
+            f"BP[{i}]/BP[0]" for i in range(1, self.bp.shape[1] + 1)
+        ])
+        self._rp_names = np.array([
+            f"RP[{i}]/RP[0]" for i in range(1, self.rp.shape[1] + 1)
+        ])
 
         self._features = {}
         self._features_err = {}
         for k, v in other_features.items():
-            self._features[k] = np.asarray(atleast_2d(v[0], insert_axis=1))
-            self._features_err[k] = np.asarray(atleast_2d(v[1], insert_axis=1))
+            self._features[k] = np.asarray(v[0])
+            self._features_err[k] = np.asarray(v[1])
 
         # HACK: assumption that in the neighborhoods, we only use coeffs
         self.X_tree = np.hstack((self.bp, self.rp))
 
-        X = np.hstack((self.bp, self.rp) + tuple(self._features.values()))
+        X = np.hstack([self.bp, self.rp] +
+                      [atleast_2d(x, insert_axis=1) for x in self._features.values()])
         self.X = X
 
         Xerr = np.hstack(
-            (self.bp_err, self.rp_err) + tuple(self._features_err.values())
+            [self.bp_err, self.rp_err] +
+            [atleast_2d(x, insert_axis=1) for x in self._features_err.values()]
         )
         self.X_err = Xerr
 
@@ -84,11 +77,8 @@ class Features:
             j = min(g.bp.shape[1], n_bp + 1)
             bp = g.bp[:, 1:j] / g.bp[:, 0:1]
             bp_err = (
-                np.sqrt(
-                    (g.bp_err[:, 1:j] / g.bp[:, 1:j]) ** 2
-                    + (g.bp_err[:, 0:1] / g.bp[:, 0:1]) ** 2
-                )
-                * np.abs(bp)
+                np.sqrt((g.bp_err[:, 1:j] / g.bp[:, 1:j])**2 +
+                        (g.bp_err[:, 0:1] / g.bp[:, 0:1])**2) * np.abs(bp)
             )
             n_xp += bp.shape[1]
 
@@ -99,11 +89,8 @@ class Features:
             j = min(g.rp.shape[1], n_rp + 1)
             rp = g.rp[:, 1:j] / g.rp[:, 0:1]
             rp_err = (
-                np.sqrt(
-                    (g.rp_err[:, 1:j] / g.rp[:, 1:j]) ** 2
-                    + (g.rp_err[:, 0:1] / g.rp[:, 0:1]) ** 2
-                )
-                * np.abs(rp)
+                np.sqrt((g.rp_err[:, 1:j] / g.rp[:, 1:j])**2 +
+                        (g.rp_err[:, 0:1] / g.rp[:, 0:1])**2) * np.abs(rp)
             )
             n_xp += rp.shape[1]
 
@@ -145,7 +132,8 @@ class Features:
             self.bp_err[slc],
             self.rp[slc],
             self.rp_err[slc],
-            **{k: (v[0][slc], v[1][slc]) for k, v in self._features.items()},
+            **{k: (v[0][slc], v[1][slc])
+               for k, v in self._features.items()},
         )
 
 
@@ -228,8 +216,5 @@ class Labels:
         new_obj = self.__class__()
         for name in self._ys:
             new_obj.add_label(
-                name,
-                self.vals[name][slc],
-                self.errs[name][slc],
-                self.labels[name]
+                name, self.vals[name][slc], self.errs[name][slc], self.labels[name]
             )
