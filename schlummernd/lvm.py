@@ -31,7 +31,8 @@ class ParameterState:
             got_shape = getattr(self, name).shape
             if got_shape != shape:
                 raise ValueError(
-                    f'Invalid shape for {name}: expected {runtime_shape}={shape}, got {got_shape}'
+                    f'Invalid shape for {name}: expected {runtime_shape}={shape}, '
+                    f'got {got_shape}'
                 )
 
     @property
@@ -41,8 +42,7 @@ class ParameterState:
 
 class LinearLVM:
 
-    def __init__(self, X, y, X_err, y_err, B, alpha, beta,
-                 verbose=False, rng=None):
+    def __init__(self, X, y, X_err, y_err, B, alpha, beta, verbose=False, rng=None):
         """
         N - stars
         R - features
@@ -89,15 +89,11 @@ class LinearLVM:
             )
         if self.X_err.shape != self.X.shape:
             shp_msg.format(
-                object_name="X_err",
-                got=self.X_err.shape,
-                expected=self.X.shape
+                object_name="X_err", got=self.X_err.shape, expected=self.X.shape
             )
         if self.y_err.shape != self.y.shape:
             shp_msg.format(
-                object_name="y_err",
-                got=self.y_err.shape,
-                expected=self.y.shape
+                object_name="y_err", got=self.y_err.shape, expected=self.y.shape
             )
 
         self._X_ivar = 1 / self.X_err**2
@@ -107,20 +103,12 @@ class LinearLVM:
         B = np.array(B, copy=True)
         _, self.sizes['D'] = B.shape
         if B.shape[0] != self.sizes['Q']:
-            shp_msg.format(
-                object_name="B",
-                got=B.shape[0],
-                expected=self.sizes['Q']
-            )
+            shp_msg.format(object_name="B", got=B.shape[0], expected=self.sizes['Q'])
 
         # Elements of B that we will fit for should be set to nan in the input B array
-        self._B_fit_mask = jnp.isnan(B)
-        if not np.any(self._B_fit_mask) and verbose:
-            print("no free elements of B")
-        elif np.any(self._B_fit_mask):
+        self._B_fit_mask = np.isnan(B)
+        if np.any(self._B_fit_mask):
             B[self._B_fit_mask] = 0.
-            if verbose:
-                print(f"using {self._B_fit_mask.sum()} free elements of B")
         self.B = jnp.array(B)
         if verbose:
             print(f"B = {B}")
@@ -136,14 +124,9 @@ class LinearLVM:
 
         self.alpha = float(alpha)
         self.beta = float(beta)
+        if np.any(np.array([self.alpha, self.beta]) < 0):
+            raise ValueError("You must regularize positively.")
 
-        # Regularization matrix:
-        self.Lambda = self.alpha * np.diag(self._z_fit_mask.astype(int))
-        if verbose:
-            print(f"Lambda = {self.Lambda}")
-        assert self.alpha > 0., "You must regularize, and strictly positively."
-
-        # TODO:
         self.par_state = self.initialize_par_state()
 
     def initialize_par_state(self, **state):
@@ -165,14 +148,12 @@ class LinearLVM:
         # TODO: could do sigma-clipping here to be more robust
         if 'mu_X' not in state:
             state['mu_X'] = (
-                np.sum(self.X * self._X_ivar, axis=0) /
-                np.sum(self._X_ivar, axis=0)
+                np.sum(self.X * self._X_ivar, axis=0) / np.sum(self._X_ivar, axis=0)
             )
 
         if 'mu_y' not in state:
             state['mu_y'] = (
-                np.sum(self.y * self._y_ivar, axis=0) /
-                np.sum(self._y_ivar, axis=0)
+                np.sum(self.y * self._y_ivar, axis=0) / np.sum(self._y_ivar, axis=0)
             )
 
         if 'z' not in state:
@@ -181,18 +162,14 @@ class LinearLVM:
             chi = (self.y - state['mu_y'][None]) / self.y_err
             for n in range(self.sizes['N']):
                 state['z'][n] = np.linalg.lstsq(
-                    self.B / self.y_err[n][:, None],
-                    chi[n],
-                    rcond=None
+                    self.B / self.y_err[n][:, None], chi[n], rcond=None
                 )[0].T
 
             # Second hack: Add some noise to unconstrained z components
             sigma = np.std(state['z'][:, ~self._z_fit_mask], axis=0)
             scale = 0.1  # MAGIC NUMBER
             state['z'][:, ~self._z_fit_mask] += self.rng.normal(
-                0,
-                scale * sigma,
-                size=(self.sizes['N'], (~self._z_fit_mask).sum())
+                0, scale * sigma, size=(self.sizes['N'], (~self._z_fit_mask).sum())
             )
 
             state['z'][:, self._z_fit_mask] = self.rng.normal(
@@ -207,18 +184,24 @@ class LinearLVM:
 
             for r in range(self.sizes['R']):
                 state['A'][r] = np.linalg.lstsq(
-                    state['z'] / self.X_err[:, r:r+1],
-                    chi[:, r],
-                    rcond=None
+                    state['z'] / self.X_err[:, r:r + 1], chi[:, r], rcond=None
                 )[0]
 
         renorm = np.sqrt(np.sum(state['A'][:, self._z_fit_mask]**2, axis=0))
-        state['A'][:, self._z_fit_mask] = state['A'][:, self._z_fit_mask] / renorm[None, :]
-        state['z'][:, self._z_fit_mask] = state['z'][:, self._z_fit_mask] * renorm[None, :]
+        state['A'][:,
+                   self._z_fit_mask] = state['A'][:, self._z_fit_mask] / renorm[None, :]
+        state['z'][:,
+                   self._z_fit_mask] = state['z'][:, self._z_fit_mask] * renorm[None, :]
 
         if 'B' not in state:
-            # TODO: implement this
-            state['B'] = self.B
+            state['B'] = np.zeros_like(self.B)
+            state['B'][~self._B_fit_mask] = self.B[~self._B_fit_mask]
+            chi = self._chi_y(state['mu_y'], state['A'], state['z'])
+
+            for r in range(self.sizes['R']):
+                state['A'][r] = np.linalg.lstsq(
+                    state['z'] / self.X_err[:, r:r + 1], chi[:, r], rcond=None
+                )[0]
 
         return ParameterState(sizes=self.sizes, **state)
 
@@ -241,7 +224,7 @@ class LinearLVM:
                 continue
 
             val = getattr(self.par_state, name)
-            state[name] = p[i:i+val.size].reshape(val.shape)
+            state[name] = p[i:i + val.size].reshape(val.shape)
             i += val.size
         return ParameterState(sizes=self.sizes, **state)
 
@@ -273,10 +256,9 @@ class LinearLVM:
         chi_y = self._chi_y(pars.mu_y, pars.B, pars.z)
 
         return 0.5 * (
-            jnp.sum(chi_X ** 2) +
-            jnp.sum(chi_y ** 2) +
-            self.alpha * jnp.sum(pars.z[:, self._z_fit_mask] ** 2) +
-            self.beta * jnp.sum(pars.A[:, self._z_fit_mask] ** 2)
+            jnp.sum(chi_X**2) + jnp.sum(chi_y**2) +
+            self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
+            self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2)
         )
 
     def __call__(self, p):
