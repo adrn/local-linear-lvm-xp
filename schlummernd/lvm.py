@@ -42,7 +42,19 @@ class ParameterState:
 
 class LinearLVM:
 
-    def __init__(self, X, y, X_err, y_err, B, alpha, beta, verbose=False, rng=None):
+    def __init__(
+        self,
+        X,
+        y,
+        X_err,
+        y_err,
+        n_latents,
+        alpha,
+        beta,
+        B_fit_idx=None,
+        verbose=False,
+        rng=None
+    ):
         """
         N - stars
         R - features
@@ -59,12 +71,14 @@ class LinearLVM:
             shape `(N, R)` array of errors (standard deviations) for the features
         y_err : array-like
             shape `(N, Q)` array of errors (standard deviations) for the labels
-        B : array-like
-            shape `(Q, D)` matrix translating latents to labels.
+        n_latents : int
+            sets the number of latent variables, i.e., `D` in the definitions above
         alpha : numeric
-            regularization strength; use the source, Luke.
+            regularization strength for latents `z`
         beta : numeric
-            burp.
+            regularization strength for unconstrained parts of matrix `A`
+        B_fit_idx : array-like
+            array of indices of rows in `B` to leave unconstrained (i.e. to fit for)
         """
         self.verbose = verbose
         if rng is None:
@@ -100,22 +114,23 @@ class LinearLVM:
         self._y_ivar = 1 / self.y_err**2
 
         # B turned into a Jax array below
-        B = np.array(B, copy=True)
-        _, self.sizes['D'] = B.shape
-        if B.shape[0] != self.sizes['Q']:
-            shp_msg.format(object_name="B", got=B.shape[0], expected=self.sizes['Q'])
+        self.sizes['D'] = int(n_latents)
+        B = np.zeros((self.sizes['Q'], self.sizes['D']))
+        B[:self.sizes['Q'], :self.sizes['Q']] = np.eye(self.sizes['Q'])
 
-        # Elements of B that we will fit for should be set to nan in the input B array
-        self._B_fit_mask = np.isnan(B)
-        if np.any(self._B_fit_mask):
-            B[self._B_fit_mask] = 0.
-        self.B = jnp.array(B)
+        # Elements of B that we will fit for:
+        if B_fit_idx is None:
+            B_fit_idx = np.array([], dtype=int)
+        self._B_fit_idx = np.array(B_fit_idx)
+        B[self._B_fit_idx] = 0.
+
+        self._B = B
         if verbose:
             print(f"B = {B}")
-            print(f"B fit elements = {self._B_fit_mask}")
+            print(f"B fit elements = {self._B_fit_idx}")
 
         # Now assess which latents to fit:
-        self._z_fit_mask = jnp.all(self.B == 0, axis=0)
+        self._z_fit_mask = jnp.all(self._B == 0, axis=0)
         if verbose:
             print(
                 f"using {self._z_fit_mask.sum()} unconstrained elements of z, "
@@ -162,7 +177,7 @@ class LinearLVM:
             chi = (self.y - state['mu_y'][None]) / self.y_err
             for n in range(self.sizes['N']):
                 state['z'][n] = np.linalg.lstsq(
-                    self.B / self.y_err[n][:, None], chi[n], rcond=None
+                    self._B / self.y_err[n][:, None], chi[n], rcond=None
                 )[0].T
 
             # Second hack: Add some noise to unconstrained z components
@@ -194,14 +209,11 @@ class LinearLVM:
                    self._z_fit_mask] = state['z'][:, self._z_fit_mask] * renorm[None, :]
 
         if 'B' not in state:
-            state['B'] = np.zeros_like(self.B)
-            state['B'][~self._B_fit_mask] = self.B[~self._B_fit_mask]
-            chi = self._chi_y(state['mu_y'], state['A'], state['z'])
+            state['B'] = self._B.copy()
+            chi = self._chi_y(state['mu_y'], state['B'], state['z'])
 
-            for r in range(self.sizes['R']):
-                state['A'][r] = np.linalg.lstsq(
-                    state['z'] / self.X_err[:, r:r + 1], chi[:, r], rcond=None
-                )[0]
+            for i in self._B_fit_idx:
+                state['B'][i] = np.linalg.lstsq(state['z'], chi[:, i], rcond=None)[0]
 
         return ParameterState(sizes=self.sizes, **state)
 
@@ -219,13 +231,20 @@ class LinearLVM:
         state = {}
         for name in self.par_state.names:
             if name == 'B':
-                # TODO: see note above
-                state['B'] = self.par_state.B
-                continue
+                val = getattr(self.par_state, name)
+                state[name] = jnp.array(val)
+                obj = state[name][self._B_fit_idx]
+                size = obj.size
+                shape = obj.shape
+                state[name] = state[name].at[self._B_fit_idx].set(
+                    p[i:i + size].reshape(shape)
+                )
+                i += size
+            else:
+                val = getattr(self.par_state, name)
+                state[name] = p[i:i + val.size].reshape(val.shape)
+                i += val.size
 
-            val = getattr(self.par_state, name)
-            state[name] = p[i:i + val.size].reshape(val.shape)
-            i += val.size
         return ParameterState(sizes=self.sizes, **state)
 
     def pack_p(self, par_state=None):
@@ -238,10 +257,10 @@ class LinearLVM:
         arrs = []
         for name in par_state.names:
             if name == 'B':
-                # TODO: deal with note above
-                continue
-
-            val = getattr(par_state, name).flatten()
+                par = getattr(par_state, name)[self._B_fit_idx]
+            else:
+                par = getattr(par_state, name)
+            val = par.flatten()
             arrs.append(val)
         return jnp.concatenate(arrs)
 
