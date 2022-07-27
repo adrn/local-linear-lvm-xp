@@ -1,0 +1,75 @@
+% \definecolor{cbblue}{HTML}{3182bd}
+% \usepackage{hyperref}
+% \definecolor{linkcolor}{rgb}{0.02,0.35,0.55}
+% \definecolor{citecolor}{rgb}{0.45,0.45,0.45}
+% \hypersetup{colorlinks=true,linkcolor=linkcolor,citecolor=citecolor,
+%             filecolor=linkcolor,urlcolor=linkcolor}
+% \hypersetup{pageanchor=true}
+
+\newcommand{\documentname}{\textsl{Article}}
+\newcommand{\sectionname}{Section}
+\renewcommand{\figurename}{Figure}
+\newcommand{\equationname}{Equation}
+\renewcommand{\tablename}{Table}
+
+% Missions
+\newcommand{\project}[1]{\textsl{#1}}
+
+% Packages / projects / programming
+\newcommand{\package}[1]{\textsl{#1}}
+\newcommand{\acronym}[1]{{\small{#1}}}
+\newcommand{\github}{\package{GitHub}}
+\newcommand{\python}{\package{Python}}
+\newcommand{\emcee}{\project{emcee}}
+
+% Stats / probability
+\newcommand{\given}{\,|\,}
+\newcommand{\norm}{\mathcal{N}}
+\newcommand{\pdf}{\textsl{pdf}}
+
+% Maths
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\transpose}[1]{{#1}^{\mathsf{T}}}
+\newcommand{\inverse}[1]{{#1}^{-1}}
+\newcommand{\argmin}{\operatornamewithlimits{argmin}}
+\newcommand{\mean}[1]{\left< #1 \right>}
+
+% Non-scalar variables
+\renewcommand{\vec}[1]{\ensuremath{\bs{#1}}}
+\newcommand{\mat}[1]{\ensuremath{\mathbf{#1}}}
+
+% Unit shortcuts
+\newcommand{\msun}{\ensuremath{\mathrm{M}_\odot}}
+\newcommand{\mjup}{\ensuremath{\mathrm{M}_{\mathrm{J}}}}
+\newcommand{\kms}{\ensuremath{\mathrm{km}~\mathrm{s}^{-1}}}
+\newcommand{\mps}{\ensuremath{\mathrm{m}~\mathrm{s}^{-1}}}
+\newcommand{\pc}{\ensuremath{\mathrm{pc}}}
+\newcommand{\kpc}{\ensuremath{\mathrm{kpc}}}
+\newcommand{\kmskpc}{\ensuremath{\mathrm{km}~\mathrm{s}^{-1}~\mathrm{kpc}^{-1}}}
+\newcommand{\dayd}{\ensuremath{\mathrm{d}}}
+\newcommand{\yr}{\ensuremath{\mathrm{yr}}}
+\newcommand{\AU}{\ensuremath{\mathrm{AU}}}
+\newcommand{\Kel}{\ensuremath{\mathrm{K}}}
+
+% Misc.
+\newcommand{\bs}[1]{\boldsymbol{#1}}
+
+% Astronomy
+\newcommand{\DM}{{\rm DM}}
+\newcommand{\feh}{\ensuremath{{[{\rm Fe}/{\rm H}]}}}
+\newcommand{\mh}{\ensuremath{{[{\rm M}/{\rm H}]}}}
+\newcommand{\df}{\acronym{DF}}
+\newcommand{\logg}{\ensuremath{\log g}}
+\newcommand{\Teff}{\ensuremath{T_{\textrm{eff}}}}
+\newcommand{\vsini}{\ensuremath{v\,\sin i}}
+\newcommand{\mtwomin}{\ensuremath{M_{2, {\rm min}}}}
+
+% TO DO
+\newcommand{\todo}[1]{{\color{red} TODO: #1}}
+
+\newcommand{\gaia}{\textsl{Gaia}}
+\newcommand{\dr}[1]{\acronym{DR}#1}
+\newcommand{\apogee}{\acronym{APOGEE}}
+\newcommand{\sdss}{\acronym{SDSS}}
+\newcommand{\sdssiv}{\acronym{SDSS-IV}}
+\newcommand{\thejoker}{\project{The~Joker}}
