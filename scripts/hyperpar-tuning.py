@@ -19,9 +19,10 @@ from schlummernd.lvm import LinearLVM
 def worker(task):
     idx, task = task
 
-    with h5py.File(task['filename'], 'r') as f:
-        if str(idx) in f.keys():
-            return
+    if task['filename'].exists():
+        with h5py.File(task['filename'], 'r') as f:
+            if str(idx) in f.keys():
+                return
 
     f = task['f']
     lbl = task['lbl']
@@ -95,19 +96,27 @@ def worker(task):
     result['true_yerr'] = lbl._untransform(np.concatenate(all_true_yerr), err=True)
     result['filename'] = task['filename']
     result['idx'] = idx
+
+    for name in ['n_latents', 'learning_rate', 'ab']:
+        result[name] = task[name]
+
     all_idx = np.concatenate(all_idx)
 
     return result
 
 
 def callback(result):
+    if result is None:
+        return
 
-    with h5py.File(result['filename'], 'r+') as f:
+    with h5py.File(result['filename'], 'a') as f:
         grp = f.create_group(str(result['idx']))
-        for k, data in result.items():
-            if k == 'filename':
-                continue
-            grp.create_dataset(name=k, data=data)
+
+        for name in ['n_latents', 'learning_rate', 'ab']:
+            grp.attrs[name] = result[name]
+
+        for name in ['predict_y', 'true_y', 'true_yerr']:
+            grp.create_dataset(name=name, data=result[name])
 
 
 def main(pool):
@@ -127,10 +136,10 @@ def main(pool):
     # These are neighborhood indices that span a range of properties, to use as guides
     # for setting the hyperparameters
     tasks = []
-    for hood_n in [2]:
+    for hood_n in [2, 200, 621, 874, 1420, 1490]:
         g = g_all[hoods[hood_n]]
         g = g.filter(
-            H_ERR=(0, 0.2)
+            J_ERR=(0, 0.2)
         )
 
         # add G-J color as an additional feature
@@ -170,19 +179,20 @@ def main(pool):
             g.LOGG_ERR,
             label=r"$\log g$"
         )
-        lbl.add_label(
-            'EBV',
-            g.SFD_EBV,
-            np.sqrt(0.01**2 + (0.02 * np.abs(g.SFD_EBV))**2),
-            label=r"E$(B-V)$"
-        )
+        # lbl.add_label(
+        #     'EBV',
+        #     g.SFD_EBV,
+        #     np.sqrt(0.01**2 + (0.02 * np.abs(g.SFD_EBV))**2),
+        #     label=r"E$(B-V)$"
+        # )
         assert np.all(lbl.y_err > 0)
 
+        n = 0
         for ab in [1e-2, 1e-1, 1e0]:
             for n_latents in [1, 4, 8]:
                 for learning_rate in [1e-6, 1e-4, 1e-2]:
                     task = {
-
+                        'seed': n,
                         'ab': ab,
                         'n_latents': n_latents,
                         'learning_rate': learning_rate,
@@ -190,7 +200,8 @@ def main(pool):
                         'f': f_all,
                         'filename': output_path / f'hyperpars-{hood_n:04d}.hdf5'
                     }
-                    tasks.append(task)
+                    tasks.append((n, task))
+                    n += 1
 
     for res in pool.map(worker, tasks, callback=callback):
         pass
