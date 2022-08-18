@@ -13,26 +13,26 @@ class Features:
 
     def __init__(
         self,
-        bp_bp0=None,
-        bp_bp0_err=None,
-        rp_rp0=None,
-        rp_rp0_err=None,
+        bp=None,
+        bp_err=None,
+        rp=None,
+        rp_err=None,
         **other_features,
     ):
-        if bp_bp0 is None:
-            bp_bp0 = []
-            bp_bp0_err = []
-        self.bp = np.asarray(atleast_2d(bp_bp0, insert_axis=1))
-        self.bp_err = np.asarray(atleast_2d(bp_bp0_err, insert_axis=1))
+        if bp is None:
+            bp = []
+            bp_err = []
+        self.bp = np.asarray(atleast_2d(bp, insert_axis=1))
+        self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1))
 
-        if rp_rp0 is None:
-            rp_rp0 = []
-            rp_rp0_err = []
-        self.rp = np.asarray(atleast_2d(rp_rp0, insert_axis=1))
-        self.rp_err = np.asarray(atleast_2d(rp_rp0_err, insert_axis=1))
+        if rp is None:
+            rp = []
+            rp_err = []
+        self.rp = np.asarray(atleast_2d(rp, insert_axis=1))
+        self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1))
 
         self._bp_names = np.array([
-            f"BP[{i}]/BP[0]" for i in range(1, self.bp.shape[1] + 1)
+            f"BP[{i}]/RP[0]" for i in range(1, self.bp.shape[1] + 1)
         ])
         self._rp_names = np.array([
             f"RP[{i}]/RP[0]" for i in range(1, self.rp.shape[1] + 1)
@@ -63,6 +63,11 @@ class Features:
 
     @classmethod
     def from_gaiadata(cls, g, n_bp=None, n_rp=None, **other_features):
+        """
+        TODO: describe in more detail
+
+        This scales all coefficients by rp0
+        """
 
         if n_bp is None:
             n_bp = 1000  # arbitrary big number
@@ -75,10 +80,10 @@ class Features:
             bp_err = None
         else:
             j = min(g.bp.shape[1], n_bp + 1)
-            bp = g.bp[:, 1:j] / g.bp[:, 0:1]
+            bp = g.bp[:, 0:j] / g.rp[:, 0:1]
             bp_err = (
-                np.sqrt((g.bp_err[:, 1:j] / g.bp[:, 1:j])**2 +
-                        (g.bp_err[:, 0:1] / g.bp[:, 0:1])**2) * np.abs(bp)
+                np.sqrt((g.bp_err[:, 0:j] / g.bp[:, 0:j])**2 +
+                        (g.rp_err[:, 0:1] / g.rp[:, 0:1])**2) * np.abs(bp)
             )
             n_xp += bp.shape[1]
 
@@ -86,7 +91,7 @@ class Features:
             rp = None
             rp_err = None
         else:
-            j = min(g.rp.shape[1], n_rp + 1)
+            j = min(g.rp.shape[1], n_rp)
             rp = g.rp[:, 1:j] / g.rp[:, 0:1]
             rp_err = (
                 np.sqrt((g.rp_err[:, 1:j] / g.rp[:, 1:j])**2 +
@@ -95,10 +100,10 @@ class Features:
             n_xp += rp.shape[1]
 
         return cls(
-            bp_bp0=bp,
-            bp_bp0_err=bp_err,
-            rp_rp0=rp,
-            rp_rp0_err=rp_err,
+            bp=bp,
+            bp_err=bp_err,
+            rp=rp,
+            rp_err=rp_err,
             **other_features,
         )
 
