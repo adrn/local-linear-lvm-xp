@@ -1,6 +1,6 @@
 """
 Pick a few quality check neighborhoods
-Run optimization with different [learning rate, n_latents]
+Run optimization with different [alpha, beta, n_latents]
 """
 
 import sys
@@ -61,21 +61,22 @@ def worker(task):
             X_train, y_train,
             X_train_err, y_train_err,
             n_latents,
-            alpha=task['ab'],
-            beta=task['ab'],
+            alpha=task['alpha'],
+            beta=task['beta'],
             verbose=False,
             rng=rng,
             **kwargs
         )
         x0 = llvm.pack_p()
 
-        opt = optax.adam(task['learning_rate'])
-        solver = jaxopt.OptaxSolver(opt=opt, fun=llvm, maxiter=2**18)
+        opt = optax.adam(1e-4)  # MAGIC NUMBER: but somewhat vetted
+        solver = jaxopt.OptaxSolver(opt=opt, fun=llvm, maxiter=2**19)
         res_adam = solver.run(x0)
 
         initial_loss = llvm(x0)
         final_loss = llvm(res_adam.params)
         assert final_loss < initial_loss
+        print(f"Optimizer Niter: {res_adam.state.iter_num}")
 
         # Test on validation sample:
         res_state = llvm.unpack_p(res_adam.params)
@@ -97,7 +98,7 @@ def worker(task):
     result['filename'] = task['filename']
     result['idx'] = idx
 
-    for name in ['n_latents', 'learning_rate', 'ab']:
+    for name in ['n_latents', 'alpha', 'beta']:
         result[name] = task[name]
 
     all_idx = np.concatenate(all_idx)
@@ -112,11 +113,13 @@ def callback(result):
     with h5py.File(result['filename'], 'a') as f:
         grp = f.create_group(str(result['idx']))
 
-        for name in ['n_latents', 'learning_rate', 'ab']:
+        for name in ['n_latents', 'alpha', 'beta']:
             grp.attrs[name] = result[name]
 
         for name in ['predict_y', 'true_y', 'true_yerr']:
-            grp.create_dataset(name=name, data=result[name])
+            grp2 = grp.create_group(name)
+            for k in result[name].keys():
+                grp2.create_dataset(name=k, data=result[name][k])
 
 
 def main(pool):
@@ -155,12 +158,12 @@ def main(pool):
         lbl = sch.Labels()
 
         schmag_factor = 10 ** (0.2 * g.phot_g_mean_mag.value) / 100.
-        lbl.add_label(
-            'schmag',
-            value=g.parallax.value * schmag_factor,
-            err=g.parallax_error.value * schmag_factor,
-            label='$G$-band schmag [absmgy$^{-1/2}$]'
-        )
+        # lbl.add_label(
+        #     'schmag',
+        #     value=g.parallax.value * schmag_factor,
+        #     err=g.parallax_error.value * schmag_factor,
+        #     label='$G$-band schmag [absmgy$^{-1/2}$]'
+        # )
         lbl.add_label(
             'TEFF',
             g.TEFF,
@@ -188,14 +191,14 @@ def main(pool):
         assert np.all(lbl.y_err > 0)
 
         n = 0
-        for ab in [1e-2, 1e-1, 1e0]:
-            for n_latents in [1, 4, 8]:
-                for learning_rate in [1e-6, 1e-4, 1e-2]:
+        for alpha in [1e-2, 1e-1, 1e0, 10]:
+            for beta in [1e-2, 1e-1, 1e0, 10]:
+                for n_latents in [1, 2, 4, 8]:
                     task = {
                         'seed': n,
-                        'ab': ab,
+                        'alpha': alpha,
+                        'beta': beta,
                         'n_latents': n_latents,
-                        'learning_rate': learning_rate,
                         'lbl': lbl,
                         'f': f_all,
                         'filename': output_path / f'hyperpars-{hood_n:04d}.hdf5'
