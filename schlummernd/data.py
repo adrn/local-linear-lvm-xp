@@ -162,14 +162,15 @@ class Features:
 
         i = 0
         if self.bp is not None:
-            features["bp"] = X[:, i : i + len(self.bp)] * self.bp_scale
-            i += len(self.bp)
+            features["bp"] = X[:, i : i + self.bp.shape[1]] * self.bp_scale
+            i += self.bp.shape[1]
 
         if self.rp is not None:
-            features["rp"] = X[:, i : i + len(self.rp)] * self.rp_scale
-            i += len(self.rp)
+            features["rp"] = X[:, i : i + self.rp.shape[1]] * self.rp_scale
+            i += self.rp.shape[1]
 
-        for j, name in enumerate(self.names, start=i):
+        print(i)
+        for j, name in enumerate(self._features.keys(), start=i):
             features[name] = X[:, j]
 
         return features
