@@ -37,11 +37,11 @@ class Features:
         self.rp = np.asarray(atleast_2d(rp, insert_axis=1)) / self.rp_scale
         self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1)) / self.rp_scale
 
-        word = " scaled" if self.bp_scale != 1.0 else ""
+        word = " scaled" if not np.all(np.atleast_1d(self.bp_scale) == 1.0) else ""
         self._bp_names = np.array(
             [f"BP[{i}]{word}" for i in range(1, self.bp.shape[1] + 1)]
         )
-        word = " scaled" if self.rp_scale != 1.0 else ""
+        word = " scaled" if not np.all(np.atleast_1d(self.rp_scale) == 1.0) else ""
         self._rp_names = np.array(
             [f"RP[{i}]{word}" for i in range(1, self.rp.shape[1] + 1)]
         )
