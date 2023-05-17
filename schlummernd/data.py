@@ -21,6 +21,7 @@ class Features:
         rp=None,
         rp_err=None,
         rp_scale=1.0,
+        apply_scale=False,
         **other_features,
     ):
         if bp is None:
@@ -32,7 +33,8 @@ class Features:
             self.bp_scale = np.full_like(self.bp, self.bp_scale)
         elif self.bp_scale.ndim != 2 and self.bp_scale.shape[0] == self.bp.shape[0]:
             self.bp_scale = self.bp_scale[:, None]
-        self.bp = self.bp / self.bp_scale
+        if apply_scale:
+            self.bp = self.bp / self.bp_scale
         self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1)) / self.bp_scale
 
         if rp is None:
@@ -44,7 +46,8 @@ class Features:
             self.rp_scale = np.full_like(self.rp, self.rp_scale)
         elif self.rp_scale.ndim != 2 and self.rp_scale.shape[0] == self.rp.shape[0]:
             self.rp_scale = self.rp_scale[:, None]
-        self.rp = self.rp / self.rp_scale
+        if apply_scale:
+            self.rp = self.rp / self.rp_scale
         self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1)) / self.rp_scale
 
         word = " scaled" if not np.all(np.atleast_1d(self.bp_scale) == 1.0) else ""
@@ -124,6 +127,7 @@ class Features:
             bp_scale=bp_scale,
             rp_scale=rp_scale,
             **other_features,
+            apply_scale=True,
         )
 
     def slice_bp(self, K):
@@ -135,6 +139,7 @@ class Features:
             self.rp_err,
             self.rp_scale,
             **{k: (self._features[k], self._features_err[k]) for k in self._features},
+            apply_scale=False,
         )
 
     def slice_rp(self, K):
@@ -146,6 +151,7 @@ class Features:
             self.rp_err[:, :K],
             self.rp_scale,
             **{k: (self._features[k], self._features_err[k]) for k in self._features},
+            apply_scale=False,
         )
 
     def __len__(self):
@@ -166,6 +172,7 @@ class Features:
                 k: (self._features[k][slc], self._features_err[k][slc])
                 for k in self._features
             },
+            apply_scale=False,
         )
 
     def X_to_features(self, X):
