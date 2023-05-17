@@ -288,6 +288,6 @@ class LinearLVM:
         for i, dy in enumerate(chi):
             M = par_state.B / y_err[i][:, None]
             z = np.linalg.lstsq(M, dy, rcond=None)[0]
-            X_hat[i] = par_state.mu_x + par_state.A @ z
+            X_hat[i] = par_state.mu_X + par_state.A @ z
 
         return X_hat
