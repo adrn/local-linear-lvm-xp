@@ -224,21 +224,33 @@ class LinearLVM:
     def _chi_y(self, mu_y, B, z):
         return (self.y - _model_linear(mu_y, B, z)) / self.y_err
 
+    def chi(self, params):
+        p = ParameterState(self.sizes, **params)
+        chi2_X = jnp.sum(self._chi_X(p.mu_X, p.A, p.z) ** 2, axis=1)
+        chi2_y = jnp.sum(self._chi_y(p.mu_y, p.B, p.z) ** 2, axis=1)
+        chi2 = (
+            chi2_X
+            + chi2_y
+            + self.alpha / self.sizes["N"] * jnp.sum(p.z[:, self._z_fit_mask] ** 2)
+            + self.beta / self.sizes["N"] * jnp.sum(p.A[:, self._z_fit_mask] ** 2)
+        )
+        return jnp.sqrt(chi2)
+
     def objective(self, params):
         """
         TODO: Regularization term is totally wrong.
         """
+        return 0.5 * jnp.sum(self.chi(params) ** 2)
+        # p = ParameterState(self.sizes, **params)
+        # chi_X = self._chi_X(p.mu_X, p.A, p.z)
+        # chi_y = self._chi_y(p.mu_y, p.B, p.z)
 
-        p = ParameterState(self.sizes, **params)
-        chi_X = self._chi_X(p.mu_X, p.A, p.z)
-        chi_y = self._chi_y(p.mu_y, p.B, p.z)
-
-        return 0.5 * (
-            jnp.sum(chi_X**2)
-            + jnp.sum(chi_y**2)
-            + self.alpha * jnp.sum(p.z[:, self._z_fit_mask] ** 2)
-            + self.beta * jnp.sum(p.A[:, self._z_fit_mask] ** 2)
-        )
+        # return 0.5 * (
+        #     jnp.sum(chi_X**2)
+        #     + jnp.sum(chi_y**2)
+        #     + self.alpha * jnp.sum(p.z[:, self._z_fit_mask] ** 2)
+        #     + self.beta * jnp.sum(p.A[:, self._z_fit_mask] ** 2)
+        # )
 
     def __call__(self, params):
         return self.objective(params)
