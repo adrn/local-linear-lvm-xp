@@ -28,8 +28,15 @@ class Features:
             bp_err = []
         self.bp_scale = np.array(bp_scale)
         self.bp = np.asarray(atleast_2d(bp, insert_axis=1))
-        if self.bp_scale.shape != self.bp.shape:
+        if self.bp_scale.shape == ():
             self.bp_scale = np.full_like(self.bp, self.bp_scale)
+        elif (
+            self.bp_scale.shape != self.bp.shape
+            and self.bp_scale.shape[0] == self.bp.shape[0]
+        ):
+            self.bp_scale = self.bp_scale[:, None]
+        else:
+            raise NotImplementedError("Sorry! Talk to Adrian.")
         self.bp = self.bp / self.bp_scale
         self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1)) / self.bp_scale
 
@@ -38,8 +45,15 @@ class Features:
             rp_err = []
         self.rp_scale = np.array(rp_scale)
         self.rp = np.asarray(atleast_2d(rp, insert_axis=1))
-        if self.rp_scale.shape != self.rp.shape:
+        if self.rp_scale.shape == ():
             self.rp_scale = np.full_like(self.rp, self.rp_scale)
+        elif (
+            self.rp_scale.shape != self.rp.shape
+            and self.rp_scale.shape[0] == self.rp.shape[0]
+        ):
+            self.rp_scale = self.rp_scale[:, None]
+        else:
+            raise NotImplementedError("Sorry! Talk to Adrian.")
         self.rp = self.rp / self.rp_scale
         self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1)) / self.rp_scale
 
