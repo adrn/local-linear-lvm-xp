@@ -18,14 +18,14 @@ class Features:
         bp=None,
         bp_err=None,
         bp_scale=1.0,
-        bp_scale_err=0.0,
         rp=None,
         rp_err=None,
         rp_scale=1.0,
-        rp_scale_err=0.0,
         apply_scale=False,
         **other_features,
     ):
+        # TODO: This interface sucks, with the scales and shit. Also it doesn't error
+        # propagate the uncertainty on the scale factor (typically rp[0])
         if bp is None:
             bp = []
             bp_err = []
