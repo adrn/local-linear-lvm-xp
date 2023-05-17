@@ -90,6 +90,9 @@ class Features:
         if n_rp is None:
             n_rp = 1000  # arbitrary big number
 
+        bp_scale = g.rp[:, 0]  # TODO: HARDCODED
+        rp_scale = g.rp[:, 0]  # TODO: HARDCODED
+
         n_xp = 0
         if n_bp == 0:
             bp = None
@@ -98,7 +101,6 @@ class Features:
             j = min(g.bp.shape[1], n_bp + 1)
             bp = g.bp[:, 0:j]
             bp_err = g.bp_err[:, 0:j]
-            bp_scale = g.rp[:, 0]  # TODO: HARDCODED
             n_xp += bp.shape[1]
 
         if n_rp == 0:
@@ -108,7 +110,6 @@ class Features:
             j = min(g.rp.shape[1], n_rp)
             rp = g.rp[:, 1:j]
             rp_err = g.rp_err[:, 1:j]
-            rp_scale = g.rp[:, 0]  # TODO: HARDCODED
             n_xp += rp.shape[1]
 
         return cls(
