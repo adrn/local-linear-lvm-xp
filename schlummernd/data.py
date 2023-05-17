@@ -26,15 +26,21 @@ class Features:
         if bp is None:
             bp = []
             bp_err = []
-        self.bp_scale = bp_scale
-        self.bp = np.asarray(atleast_2d(bp, insert_axis=1)) / self.bp_scale
+        self.bp_scale = np.array(bp_scale)
+        self.bp = np.asarray(atleast_2d(bp, insert_axis=1))
+        if self.bp_scale.shape != self.bp.shape:
+            self.bp_scale = np.full_like(self.bp, self.bp_scale)
+        self.bp = self.bp / self.bp_scale
         self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1)) / self.bp_scale
 
         if rp is None:
             rp = []
             rp_err = []
-        self.rp_scale = rp_scale
-        self.rp = np.asarray(atleast_2d(rp, insert_axis=1)) / self.rp_scale
+        self.rp_scale = np.array(rp_scale)
+        self.rp = np.asarray(atleast_2d(rp, insert_axis=1))
+        if self.rp_scale.shape != self.rp.shape:
+            self.rp_scale = np.full_like(self.rp, self.rp_scale)
+        self.rp = self.rp / self.rp_scale
         self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1)) / self.rp_scale
 
         word = " scaled" if not np.all(np.atleast_1d(self.bp_scale) == 1.0) else ""
@@ -147,10 +153,10 @@ class Features:
         return self.__class__(
             self.bp[slc],
             self.bp_err[slc],
-            self.bp_scale,
+            self.bp_scale[slc],
             self.rp[slc],
             self.rp_err[slc],
-            self.rp_scale,
+            self.rp_scale[slc],
             **{
                 k: (self._features[k][slc], self._features_err[k][slc])
                 for k in self._features
