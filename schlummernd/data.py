@@ -26,16 +26,16 @@ class Features:
         if bp is None:
             bp = []
             bp_err = []
+        self.bp_scale = bp_scale
         self.bp = np.asarray(atleast_2d(bp, insert_axis=1)) / self.bp_scale
         self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1)) / self.bp_scale
-        self.bp_scale = bp_scale
 
         if rp is None:
             rp = []
             rp_err = []
+        self.rp_scale = rp_scale
         self.rp = np.asarray(atleast_2d(rp, insert_axis=1)) / self.rp_scale
         self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1)) / self.rp_scale
-        self.rp_scale = rp_scale
 
         word = " scaled" if self.bp_scale != 1.0 else ""
         self._bp_names = np.array(
