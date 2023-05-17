@@ -9,34 +9,42 @@ class Features:
     """
     TODO: currently ignoring uncertainties. In principle, we should also keep track of
     covariance matrices or at least variances for the features.
+
+    TODO: really need to support not dividing by RP[0] in the future...
     """
 
     def __init__(
         self,
         bp=None,
         bp_err=None,
+        bp_scale=1.0,
         rp=None,
         rp_err=None,
+        rp_scale=1.0,
         **other_features,
     ):
         if bp is None:
             bp = []
             bp_err = []
-        self.bp = np.asarray(atleast_2d(bp, insert_axis=1))
-        self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1))
+        self.bp = np.asarray(atleast_2d(bp, insert_axis=1)) / self.bp_scale
+        self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1)) / self.bp_scale
+        self.bp_scale = bp_scale
 
         if rp is None:
             rp = []
             rp_err = []
-        self.rp = np.asarray(atleast_2d(rp, insert_axis=1))
-        self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1))
+        self.rp = np.asarray(atleast_2d(rp, insert_axis=1)) / self.rp_scale
+        self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1)) / self.rp_scale
+        self.rp_scale = rp_scale
 
-        self._bp_names = np.array([
-            f"BP[{i}]/RP[0]" for i in range(1, self.bp.shape[1] + 1)
-        ])
-        self._rp_names = np.array([
-            f"RP[{i}]/RP[0]" for i in range(1, self.rp.shape[1] + 1)
-        ])
+        word = " scaled" if self.bp_scale != 1.0 else ""
+        self._bp_names = np.array(
+            [f"BP[{i}]{word}" for i in range(1, self.bp.shape[1] + 1)]
+        )
+        word = " scaled" if self.rp_scale != 1.0 else ""
+        self._rp_names = np.array(
+            [f"RP[{i}]{word}" for i in range(1, self.rp.shape[1] + 1)]
+        )
 
         self._features = {}
         self._features_err = {}
@@ -47,13 +55,15 @@ class Features:
         # HACK: assumption that in the neighborhoods, we only use coeffs
         self.X_tree = np.hstack((self.bp, self.rp))
 
-        X = np.hstack([self.bp, self.rp] +
-                      [atleast_2d(x, insert_axis=1) for x in self._features.values()])
+        X = np.hstack(
+            [self.bp, self.rp]
+            + [atleast_2d(x, insert_axis=1) for x in self._features.values()]
+        )
         self.X = X
 
         Xerr = np.hstack(
-            [self.bp_err, self.rp_err] +
-            [atleast_2d(x, insert_axis=1) for x in self._features_err.values()]
+            [self.bp_err, self.rp_err]
+            + [atleast_2d(x, insert_axis=1) for x in self._features_err.values()]
         )
         self.X_err = Xerr
 
@@ -80,11 +90,9 @@ class Features:
             bp_err = None
         else:
             j = min(g.bp.shape[1], n_bp + 1)
-            bp = g.bp[:, 0:j] / g.rp[:, 0:1]
-            bp_err = (
-                np.sqrt((g.bp_err[:, 0:j] / g.bp[:, 0:j])**2 +
-                        (g.rp_err[:, 0:1] / g.rp[:, 0:1])**2) * np.abs(bp)
-            )
+            bp = g.bp[:, 0:j]
+            bp_err = g.bp_err[:, 0:j]
+            bp_scale = g.rp[:, 0:1]  # TODO: HARDCODED
             n_xp += bp.shape[1]
 
         if n_rp == 0:
@@ -92,11 +100,9 @@ class Features:
             rp_err = None
         else:
             j = min(g.rp.shape[1], n_rp)
-            rp = g.rp[:, 1:j] / g.rp[:, 0:1]
-            rp_err = (
-                np.sqrt((g.rp_err[:, 1:j] / g.rp[:, 1:j])**2 +
-                        (g.rp_err[:, 0:1] / g.rp[:, 0:1])**2) * np.abs(rp)
-            )
+            rp = g.rp[:, 1:j]
+            rp_err = g.rp_err[:, 1:j]
+            rp_scale = g.rp[:, 0:1]  # TODO: HARDCODED
             n_xp += rp.shape[1]
 
         return cls(
@@ -104,6 +110,8 @@ class Features:
             bp_err=bp_err,
             rp=rp,
             rp_err=rp_err,
+            bp_scale=bp_scale,
+            rp_scale=rp_scale,
             **other_features,
         )
 
@@ -111,20 +119,22 @@ class Features:
         return self.__class__(
             self.bp[:, :K],
             self.bp_err[:, :K],
+            self.bp_scale,
             self.rp,
             self.rp_err,
-            **{k: (self._features[k], self._features_err[k])
-               for k in self._features},
+            self.rp_scale,
+            **{k: (self._features[k], self._features_err[k]) for k in self._features},
         )
 
     def slice_rp(self, K):
         return self.__class__(
             self.bp,
             self.bp_err,
+            self.bp_scale,
             self.rp[:, :K],
             self.rp_err[:, :K],
-            **{k: (self._features[k], self._features_err[k])
-               for k in self._features},
+            self.rp_scale,
+            **{k: (self._features[k], self._features_err[k]) for k in self._features},
         )
 
     def __len__(self):
@@ -137,17 +147,35 @@ class Features:
         return self.__class__(
             self.bp[slc],
             self.bp_err[slc],
+            self.bp_scale,
             self.rp[slc],
             self.rp_err[slc],
+            self.rp_scale,
             **{
                 k: (self._features[k][slc], self._features_err[k][slc])
                 for k in self._features
             },
         )
 
+    def X_to_features(self, X):
+        features = {}
+
+        i = 0
+        if self.bp is not None:
+            features["bp"] = X[:, i : i + len(self.bp)] * self.bp_scale
+            i += len(self.bp)
+
+        if self.rp is not None:
+            features["rp"] = X[:, i : i + len(self.rp)] * self.rp_scale
+            i += len(self.rp)
+
+        for j, name in enumerate(self.names, start=i):
+            features[name] = X[:, j]
+
+        return features
+
 
 class Labels:
-
     def __init__(self):
         self.vals = {}
         self.errs = {}
