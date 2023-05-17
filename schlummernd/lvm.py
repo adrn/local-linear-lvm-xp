@@ -50,7 +50,7 @@ class LinearLVM:
         n_latents,
         alpha,
         beta,
-        B_fit_idx=None,
+        B_fit_idx_cols=None,
         verbose=False,
         rng=None,
     ):
@@ -76,8 +76,8 @@ class LinearLVM:
             regularization strength for latents `z`
         beta : numeric
             regularization strength for unconstrained parts of matrix `A`
-        B_fit_idx : array-like
-            array of indices of rows in `B` to leave unconstrained (i.e. to fit for)
+        B_fit_idx_cols : array-like
+            array of indices of columns in `B` to leave unconstrained (i.e. to fit for)
         """
         self.verbose = verbose
         if rng is None:
@@ -118,15 +118,15 @@ class LinearLVM:
         B[: self.sizes["Q"], : self.sizes["Q"]] = np.eye(self.sizes["Q"])
 
         # Elements of B that we will fit for:
-        if B_fit_idx is None:
-            B_fit_idx = np.array([], dtype=int)
-        self._B_fit_idx = np.array(B_fit_idx)
-        B[self._B_fit_idx] = 0.0
+        if B_fit_idx_cols is None:
+            B_fit_idx_cols = np.array([], dtype=int)
+        self._B_fit_idx_cols = B_fit_idx_cols
+        B[:, self._B_fit_idx_cols] = 0.0
 
         self._B = B
         if verbose:
             print(f"B = {B}")
-            print(f"B fit elements = {self._B_fit_idx}")
+            print(f"B fit elements = {self._B_fit_idx_cols}")
 
         # Now assess which latents to fit:
         self._z_fit_mask = jnp.all(self._B == 0, axis=0)
@@ -213,7 +213,7 @@ class LinearLVM:
             state["B"] = self._B.copy()
             chi = self._chi_y(state["mu_y"], state["B"], state["z"])
 
-            for i in self._B_fit_idx:
+            for i in self._B_fit_idx_cols:
                 state["B"][i] = np.linalg.lstsq(state["z"], chi[:, i], rcond=None)[0]
 
         return ParameterState(sizes=self.sizes, **state)
