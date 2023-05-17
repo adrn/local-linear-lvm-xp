@@ -98,7 +98,7 @@ class Features:
             j = min(g.bp.shape[1], n_bp + 1)
             bp = g.bp[:, 0:j]
             bp_err = g.bp_err[:, 0:j]
-            bp_scale = g.rp[:, 0:1]  # TODO: HARDCODED
+            bp_scale = g.rp[:, 0]  # TODO: HARDCODED
             n_xp += bp.shape[1]
 
         if n_rp == 0:
@@ -108,7 +108,7 @@ class Features:
             j = min(g.rp.shape[1], n_rp)
             rp = g.rp[:, 1:j]
             rp_err = g.rp_err[:, 1:j]
-            rp_scale = g.rp[:, 0:1]  # TODO: HARDCODED
+            rp_scale = g.rp[:, 0]  # TODO: HARDCODED
             n_xp += rp.shape[1]
 
         return cls(
@@ -151,12 +151,12 @@ class Features:
             slc = slice(slc, slc + 1)
 
         return self.__class__(
-            self.bp[slc],
-            self.bp_err[slc],
-            self.bp_scale[slc],
-            self.rp[slc],
-            self.rp_err[slc],
-            self.rp_scale[slc],
+            bp=self.bp[slc],
+            bp_err=self.bp_err[slc],
+            bp_scale=self.bp_scale[slc],
+            rp=self.rp[slc],
+            rp_err=self.rp_err[slc],
+            rp_scale=self.rp_scale[slc],
             **{
                 k: (self._features[k][slc], self._features_err[k][slc])
                 for k in self._features
