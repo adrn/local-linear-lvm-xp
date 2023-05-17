@@ -14,15 +14,15 @@ def _model_linear(mu, A, x):
 @dataclass
 class ParameterState:
     sizes: Dict
-    A: Annotated[Any, ('R', 'D')]  # noqa
-    B: Annotated[Any, ('Q', 'D')]  # noqa
-    z: Annotated[Any, ('N', 'D')]  # noqa
-    mu_X: Annotated[Any, ('R', )]  # noqa
-    mu_y: Annotated[Any, ('Q', )]  # noqa
+    A: Annotated[Any, ("R", "D")]  # noqa
+    B: Annotated[Any, ("Q", "D")]  # noqa
+    z: Annotated[Any, ("N", "D")]  # noqa
+    mu_X: Annotated[Any, ("R",)]  # noqa
+    mu_y: Annotated[Any, ("Q",)]  # noqa
 
     def __post_init__(self):
         for name, field in self.__dataclass_fields__.items():
-            if name == 'sizes':
+            if name == "sizes":
                 continue
 
             runtime_shape = get_args(field.type)[1]
@@ -31,17 +31,16 @@ class ParameterState:
             got_shape = getattr(self, name).shape
             if got_shape != shape:
                 raise ValueError(
-                    f'Invalid shape for {name}: expected {runtime_shape}={shape}, '
-                    f'got {got_shape}'
+                    f"Invalid shape for {name}: expected {runtime_shape}={shape}, "
+                    f"got {got_shape}"
                 )
 
     @property
     def names(self):
-        return [x for x in self.__dataclass_fields__.keys() if x != 'sizes']
+        return [x for x in self.__dataclass_fields__.keys() if x != "sizes"]
 
 
 class LinearLVM:
-
     def __init__(
         self,
         X,
@@ -53,7 +52,7 @@ class LinearLVM:
         beta,
         B_fit_idx=None,
         verbose=False,
-        rng=None
+        rng=None,
     ):
         """
         N - stars
@@ -91,15 +90,15 @@ class LinearLVM:
         self.y_err = jnp.array(y_err)
 
         self.sizes = {}
-        self.sizes['N'], self.sizes['R'] = self.X.shape
-        self.sizes['Q'] = self.y.shape[1]
+        self.sizes["N"], self.sizes["R"] = self.X.shape
+        self.sizes["Q"] = self.y.shape[1]
 
         shp_msg = "Invalid shape for {object_name}: got {got}, expected {expected})"
-        if self.y.shape[0] != self.sizes['N']:
+        if self.y.shape[0] != self.sizes["N"]:
             shp_msg.format(
                 object_name="training labels y",
                 got=self.y.shape[0],
-                expected=self.sizes['N']
+                expected=self.sizes["N"],
             )
         if self.X_err.shape != self.X.shape:
             shp_msg.format(
@@ -114,15 +113,15 @@ class LinearLVM:
         self._y_ivar = 1 / self.y_err**2
 
         # B turned into a Jax array below
-        self.sizes['D'] = int(n_latents)
-        B = np.zeros((self.sizes['Q'], self.sizes['D']))
-        B[:self.sizes['Q'], :self.sizes['Q']] = np.eye(self.sizes['Q'])
+        self.sizes["D"] = int(n_latents)
+        B = np.zeros((self.sizes["Q"], self.sizes["D"]))
+        B[: self.sizes["Q"], : self.sizes["Q"]] = np.eye(self.sizes["Q"])
 
         # Elements of B that we will fit for:
         if B_fit_idx is None:
             B_fit_idx = np.array([], dtype=int)
         self._B_fit_idx = np.array(B_fit_idx)
-        B[self._B_fit_idx] = 0.
+        B[self._B_fit_idx] = 0.0
 
         self._B = B
         if verbose:
@@ -161,59 +160,61 @@ class LinearLVM:
 
         # Initialize the means using invvar weighted means
         # TODO: could do sigma-clipping here to be more robust
-        if 'mu_X' not in state:
-            state['mu_X'] = (
-                np.sum(self.X * self._X_ivar, axis=0) / np.sum(self._X_ivar, axis=0)
+        if "mu_X" not in state:
+            state["mu_X"] = np.sum(self.X * self._X_ivar, axis=0) / np.sum(
+                self._X_ivar, axis=0
             )
 
-        if 'mu_y' not in state:
-            state['mu_y'] = (
-                np.sum(self.y * self._y_ivar, axis=0) / np.sum(self._y_ivar, axis=0)
+        if "mu_y" not in state:
+            state["mu_y"] = np.sum(self.y * self._y_ivar, axis=0) / np.sum(
+                self._y_ivar, axis=0
             )
 
-        if 'z' not in state:
+        if "z" not in state:
             # First hack: Start with the pseudo-inverse of `B`.
-            state['z'] = np.zeros((self.sizes['N'], self.sizes['D']))
-            chi = (self.y - state['mu_y'][None]) / self.y_err
-            for n in range(self.sizes['N']):
-                state['z'][n] = np.linalg.lstsq(
+            state["z"] = np.zeros((self.sizes["N"], self.sizes["D"]))
+            chi = (self.y - state["mu_y"][None]) / self.y_err
+            for n in range(self.sizes["N"]):
+                state["z"][n] = np.linalg.lstsq(
                     self._B / self.y_err[n][:, None], chi[n], rcond=None
                 )[0].T
 
             # Second hack: Add some noise to unconstrained z components
-            sigma = np.std(state['z'][:, ~self._z_fit_mask], axis=0)
+            sigma = np.std(state["z"][:, ~self._z_fit_mask], axis=0)
             scale = 0.1  # MAGIC NUMBER
-            state['z'][:, ~self._z_fit_mask] += self.rng.normal(
-                0, scale * sigma, size=(self.sizes['N'], (~self._z_fit_mask).sum())
+            state["z"][:, ~self._z_fit_mask] += self.rng.normal(
+                0, scale * sigma, size=(self.sizes["N"], (~self._z_fit_mask).sum())
             )
 
-            state['z'][:, self._z_fit_mask] = self.rng.normal(
+            state["z"][:, self._z_fit_mask] = self.rng.normal(
                 0,
                 scale * np.mean(sigma),
-                size=(self.sizes['N'], self._z_fit_mask.sum())
+                size=(self.sizes["N"], self._z_fit_mask.sum()),
             )
 
-        if 'A' not in state:
-            state['A'] = np.zeros((self.sizes['R'], self.sizes['D']))
-            chi = self._chi_X(state['mu_X'], state['A'], state['z'])
+        if "A" not in state:
+            state["A"] = np.zeros((self.sizes["R"], self.sizes["D"]))
+            chi = self._chi_X(state["mu_X"], state["A"], state["z"])
 
-            for r in range(self.sizes['R']):
-                state['A'][r] = np.linalg.lstsq(
-                    state['z'] / self.X_err[:, r:r + 1], chi[:, r], rcond=None
+            for r in range(self.sizes["R"]):
+                state["A"][r] = np.linalg.lstsq(
+                    state["z"] / self.X_err[:, r : r + 1], chi[:, r], rcond=None
                 )[0]
 
-        renorm = np.sqrt(np.sum(state['A'][:, self._z_fit_mask]**2, axis=0))
-        state['A'][:,
-                   self._z_fit_mask] = state['A'][:, self._z_fit_mask] / renorm[None, :]
-        state['z'][:,
-                   self._z_fit_mask] = state['z'][:, self._z_fit_mask] * renorm[None, :]
+        renorm = np.sqrt(np.sum(state["A"][:, self._z_fit_mask] ** 2, axis=0))
+        state["A"][:, self._z_fit_mask] = (
+            state["A"][:, self._z_fit_mask] / renorm[None, :]
+        )
+        state["z"][:, self._z_fit_mask] = (
+            state["z"][:, self._z_fit_mask] * renorm[None, :]
+        )
 
-        if 'B' not in state:
-            state['B'] = self._B.copy()
-            chi = self._chi_y(state['mu_y'], state['B'], state['z'])
+        if "B" not in state:
+            state["B"] = self._B.copy()
+            chi = self._chi_y(state["mu_y"], state["B"], state["z"])
 
             for i in self._B_fit_idx:
-                state['B'][i] = np.linalg.lstsq(state['z'], chi[:, i], rcond=None)[0]
+                state["B"][i] = np.linalg.lstsq(state["z"], chi[:, i], rcond=None)[0]
 
         return ParameterState(sizes=self.sizes, **state)
 
@@ -223,66 +224,24 @@ class LinearLVM:
     def _chi_y(self, mu_y, B, z):
         return (self.y - _model_linear(mu_y, B, z)) / self.y_err
 
-    def unpack_p(self, p):
-        """
-        TODO: deal with some of B is frozen
-        """
-        i = 0
-        state = {}
-        for name in self.par_state.names:
-            if name == 'B':
-                val = getattr(self.par_state, name)
-                state[name] = jnp.array(val)
-                obj = state[name][self._B_fit_idx]
-                size = obj.size
-                shape = obj.shape
-                state[name] = state[name].at[self._B_fit_idx].set(
-                    p[i:i + size].reshape(shape)
-                )
-                i += size
-            else:
-                val = getattr(self.par_state, name)
-                state[name] = p[i:i + val.size].reshape(val.shape)
-                i += val.size
-
-        return ParameterState(sizes=self.sizes, **state)
-
-    def pack_p(self, par_state=None):
-        """
-        TODO: deal with some of B is frozen
-        """
-        if par_state is None:
-            par_state = self.par_state
-
-        arrs = []
-        for name in par_state.names:
-            if name == 'B':
-                par = getattr(par_state, name)[self._B_fit_idx]
-            else:
-                par = getattr(par_state, name)
-            val = par.flatten()
-            arrs.append(val)
-        return jnp.concatenate(arrs)
-
-    def cost(self, p):
+    def objective(self, params):
         """
         TODO: Regularization term is totally wrong.
         """
-        pars = self.unpack_p(p)
-        # TODO: set par_state??
 
-        chi_X = self._chi_X(pars.mu_X, pars.A, pars.z)
-        chi_y = self._chi_y(pars.mu_y, pars.B, pars.z)
+        p = ParameterState(self.sizes, **params)
+        chi_X = self._chi_X(p.mu_X, p.A, p.z)
+        chi_y = self._chi_y(p.mu_y, p.B, p.z)
 
         return 0.5 * (
-            jnp.sum(chi_X**2) + jnp.sum(chi_y**2) +
-            self.alpha * jnp.sum(pars.z[:, self._z_fit_mask]**2) +
-            self.beta * jnp.sum(pars.A[:, self._z_fit_mask]**2)
+            jnp.sum(chi_X**2)
+            + jnp.sum(chi_y**2)
+            + self.alpha * jnp.sum(p.z[:, self._z_fit_mask] ** 2)
+            + self.beta * jnp.sum(p.A[:, self._z_fit_mask] ** 2)
         )
 
-    def __call__(self, p):
-        val = self.cost(p)
-        return val
+    def __call__(self, params):
+        return self.objective(params)
 
     def predict_y(self, X, X_err, par_state=None):
         if par_state is None:
@@ -290,10 +249,10 @@ class LinearLVM:
 
         # should this use the regularization matrix? Hogg thinks not.
         M = X.shape[0]
-        if X.shape[1] != self.sizes['R']:
+        if X.shape[1] != self.sizes["R"]:
             raise ValueError("Invalid shape for input feature matrix X")
 
-        y_hat = np.zeros((M, self.sizes['Q']))
+        y_hat = np.zeros((M, self.sizes["Q"]))
 
         chi = (X - par_state.mu_X[None]) / X_err
         for i, dx in enumerate(chi):
