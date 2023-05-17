@@ -273,3 +273,21 @@ class LinearLVM:
             y_hat[i] = par_state.mu_y + par_state.B @ z
 
         return y_hat
+
+    def predict_X(self, y, y_err, par_state=None):
+        if par_state is None:
+            par_state = self.par_state
+
+        M = y.shape[0]
+        if y.shape[1] != self.sizes["Q"]:
+            raise ValueError("Invalid shape for input label array y")
+
+        X_hat = np.zeros((M, self.sizes["R"]))
+
+        chi = (y - par_state.mu_y[None]) / y_err
+        for i, dy in enumerate(chi):
+            M = par_state.B / y_err[i][:, None]
+            z = np.linalg.lstsq(M, dy, rcond=None)[0]
+            X_hat[i] = par_state.mu_x + par_state.A @ z
+
+        return X_hat
