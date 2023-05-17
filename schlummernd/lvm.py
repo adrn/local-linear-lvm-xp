@@ -214,7 +214,7 @@ class LinearLVM:
             chi = self._chi_y(state["mu_y"], state["B"], state["z"])
 
             for i in self._B_fit_idx_cols:
-                state["B"][i] = np.linalg.lstsq(state["z"], chi[:, i], rcond=None)[0]
+                state["B"][:, i] = np.linalg.lstsq(state["z"], chi[:, i], rcond=None)[0]
 
         return ParameterState(sizes=self.sizes, **state)
 
