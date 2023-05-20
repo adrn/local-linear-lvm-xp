@@ -9,8 +9,6 @@ class Features:
     """
     TODO: currently ignoring uncertainties. In principle, we should also keep track of
     covariance matrices or at least variances for the features.
-
-    TODO: really need to support not dividing by RP[0] in the future...
     """
 
     def __init__(
@@ -200,81 +198,158 @@ class Features:
 
 class Labels:
     def __init__(self):
-        self.vals = {}
-        self.errs = {}
-        self.labels = {}
-        self._shape = None
-        self._percs = None
+        self._vals = {}
+        self.plot_labels = {}
+        self._icov_parts = []
         self._y = None
-        self._y_err = None
+        self._y_Cinv = None
 
-    def add_label(self, name, value, err, label=None):
-        if label is None:
-            label = name
+        # value percentiles used to scale the label values below
+        self._percs = None
+
+        # number of stars
+        self.N = None
+        self.Q = 0
+
+    def add_label(self, name, value, var, plot_label=None):
+        """
+        Parameters
+        ----------
+        name : str
+            the name of the label (e.g., '[Fe/H]' or 'logg')
+        value : array-like
+            an array of values for the label
+        var : array-like
+            an array of error variances (square of the 'error')
+        plot_label : str (optional)
+            used to label axes when making plots of the label values
+        """
+        if plot_label is None:
+            plot_label = name
 
         value = np.array(value)
-        err = np.array(err)
+        var = np.array(var)
 
-        if len(self.vals) == 0:
-            self._shape = value.shape
+        if self.N is None:
+            self.N = len(value)
 
-        if value.shape != self._shape or err.shape != self._shape:
-            raise ValueError("Invalid shape.")
+        if value.ndim != 1 or value.shape[0] != self.N or var.shape != value.shape:
+            raise ValueError("Invalid shape for input `value` or `var`.")
 
-        self.vals[name] = value
-        self.errs[name] = err
-        self.labels[name] = label
+        self._vals[name] = value
+        self._icov_parts.append(1 / var)
+        self.plot_labels[name] = plot_label
+        self.Q += 1
 
-    def _transform(self, vals, err=False):
+    def add_label_group(self, names, values, cov, plot_labels=None):
+        """
+        Parameters
+        ----------
+        names : array-like of str
+            the names of the labels
+        values : array-like
+            an array of values for the labels, with shape `(N, Q)`
+        var : array-like
+            an array of covariance matrices for the labels, with shape `(N, Q, Q)`
+        plot_labels : str (optional)
+            used to label axes when making plots of the label values
+        """
+        if plot_labels is None:
+            plot_labels = names
+
+        values = np.array(values)
+        cov = np.array(cov)
+
+        if values.ndim == 1:
+            raise RuntimeError("Use .add_label() for adding 1D labels")
+
+        if self.N is None:
+            self.N = len(values)
+
+        if (
+            values.ndim != 2
+            or values.shape[0] != self.N
+            or cov.shape[:2] != values.shape
+            or cov.shape[1] != cov.shape[2]
+            or len(names) != values.shape[1]
+        ):
+            raise ValueError("Invalid shape for input `value` or `cov`.")
+
+        for i, name in enumerate(names):
+            self._vals[name] = values[:, i]
+            self.plot_labels[name] = plot_labels[i]
+
+        self._icov_parts.append(np.linalg.inv(cov))
+        self.Q += len(names)
+
+    def _make_icov(self):
+        Cinv = np.zeros((self.N, self.Q, self.Q))
+
+        i = 0
+        for part in self._icov_parts:
+            K = part.shape[1] if part.ndim > 1 else 1
+            Cinv[:, i : i + K, i : i + K].flat = part
+            i += K
+
+        return Cinv
+
+    def _transform(self, vals, icov=False):
         if self._percs is None:
             self._percs = {}
-            for name, val in self.vals.items():
-                self._percs[name] = np.nanpercentile(val, [16, 50, 84])
+            for name, val in self._vals.items():
+                self._percs[name] = np.nanpercentile(val, [50, 16, 84])
 
-        new_vals = {}
-        for name, perc in self._percs.items():
-            scale = perc[2] - perc[0]
-            new_vals[name] = vals[name] / scale
-            if not err:
-                new_vals[name] = new_vals[name] - perc[1] / scale
+        if not icov:
+            new_vals = {}
+            for name, perc in self._percs.items():
+                new_vals[name] = (vals[name] - perc[0]) / (perc[2] - perc[1])
+        else:
+            # Scale the inverse variance matrix
+            Minv = np.diag([(perc[2] - perc[1]) for perc in self._percs.values()])
+            Cinv = self._make_icov()
+            new_vals = np.einsum("ik,nkl,lj->nij", Minv, Cinv, Minv)
 
         return new_vals
 
-    def _untransform(self, ys, err=False):
+    def _untransform(self, ys, icov=False):
         if self._percs is None:
             self._percs = {}
             for name, val in self.vals.items():
-                self._percs[name] = np.nanpercentile(val, [16, 50, 84])
+                self._percs[name] = np.nanpercentile(val, [50, 16, 84])
 
-        new_vals = {}
-        for i, (name, perc) in enumerate(self._percs.items()):
-            scale = perc[2] - perc[0]
-            new_vals[name] = ys[:, i] * scale
-            if not err:
-                new_vals[name] = new_vals[name] + perc[1]
+        if not icov:
+            new_vals = {}
+            for i, (name, perc) in enumerate(self._percs.items()):
+                new_vals[name] = ys[:, i] * (perc[2] - perc[1]) + perc[0]
+
+        else:
+            # Scale the inverse variance matrix
+            Minv = np.diag([1 / (perc[2] - perc[1]) for perc in self._percs.values()])
+            Cinv = self._make_icov()
+            new_vals = np.einsum("ik,nkl,lj->nij", Minv, Cinv, Minv)
 
         return new_vals
 
     @property
     def y(self):
-        if self._y is None or self._y.shape[1] != len(self.vals):
-            new_vals = self._transform(self.vals)
+        if self._y is None or self._y.shape[1] != len(self._vals):
+            new_vals = self._transform(self._vals)
             self._y = np.stack(list(new_vals.values())).T.astype(np.float64)
         return self._y
 
     @property
-    def y_err(self):
-        if self._y_err is None or self._y_err.shape[1] != len(self.vals):
-            new_errs = self._transform(self.errs, err=True)
-            self._y_err = np.abs(np.stack(list(new_errs.values())).T).astype(np.float64)
-        return self._y_err
+    def y_Cinv(self):
+        if self._y_Cinv is None or self._y_Cinv.shape[1] != len(self._vals):
+            new_Cinv = self._transform(self._make_icov(), icov=True)
+            self._y_Cinv = new_Cinv.astype(np.float64)
+        return self._y_Cinv
 
-    def __getitem__(self, slc):
-        if isinstance(slc, int):
-            slc = slice(slc, slc + 1)
+    # def __getitem__(self, slc):
+    #     if isinstance(slc, int):
+    #         slc = slice(slc, slc + 1)
 
-        new_obj = self.__class__()
-        for name in self._ys:
-            new_obj.add_label(
-                name, self.vals[name][slc], self.errs[name][slc], self.labels[name]
-            )
+    #     new_obj = self.__class__()
+    #     for name in self._vals:
+    #         new_obj.add_label(
+    #             name, self.vals[name][slc], self.errs[name][slc], self.plot_labels[name]
+    #         )
