@@ -45,8 +45,8 @@ class LinearLVM:
         self,
         X,
         y,
-        X_var,
-        y_var,
+        X_Cinv,
+        y_Cinv,
         n_latents,
         alpha,
         beta,
@@ -65,12 +65,12 @@ class LinearLVM:
             shape `(N, R)` array of training features
         y : array-like
             shape `(N, Q)` array of training labels
-        X_var : array-like
-            shape `(N, R, R)` covariance matrix array, or `(N, R)` array of error
-            variances for the features (i.e. NOT THE STANDARD DEVIATIONS)
-        y_var : array-like
-            shape `(N, Q, Q)` covariance matrix array, or `(N, Q)` array of error
-            variances for the labels (i.e. NOT THE STANDARD DEVIATIONS)
+        X_Cinv : array-like
+            shape `(N, R, R)` inverse-variance matrix array, or `(N, R)` array of error
+            inverse variances for the features (i.e. NOT THE STANDARD DEVIATIONS)
+        y_Cinv : array-like
+            shape `(N, Q, Q)` inverse-variance matrix array, or `(N, Q)` array of error
+            inverse variances for the labels (i.e. NOT THE STANDARD DEVIATIONS)
         n_latents : int
             sets the number of latent variables, i.e., `D` in the definitions above
         alpha : numeric
@@ -85,8 +85,8 @@ class LinearLVM:
 
         self.X = jnp.array(X)
         self.y = jnp.array(y)
-        self.X_var = jnp.array(X_var)
-        self.y_var = jnp.array(y_var)
+        self.X_Cinv = jnp.array(X_Cinv)
+        self.y_Cinv = jnp.array(y_Cinv)
 
         self.sizes = {}
         self.sizes["N"], self.sizes["R"] = self.X.shape
@@ -129,16 +129,6 @@ class LinearLVM:
                     )
                 )
 
-        if self.X_var.ndim == 3:
-            self._X_Cinv = jnp.linalg.inv(self.X_var)
-        else:
-            self._X_Cinv = 1 / self.X_var
-
-        if self.y_var.ndim == 3:
-            self._y_Cinv = jnp.linalg.inv(self.y_var)
-        else:
-            self._y_Cinv = 1 / self.y_var
-
         # First square block of B is the identity matrix, so some latents are
         # semi-interpretable:
         # (B turned into a Jax array below)
@@ -160,15 +150,15 @@ class LinearLVM:
 
     def _chi2_X(self, mu_X, A, z):
         dX = self.X - _model_linear(mu_X, A, z)
-        if self.X_var.ndim == 3:
-            return jnp.einsum("in,nij,nj->n", dX.T, self._X_Cinv, dX)
+        if self.X_Cinv.ndim == 3:
+            return jnp.einsum("ni,nij,nj->n", dX, self.X_Cinv, dX)
         else:
             return jnp.sum(dX**2 / self.X_var, axis=1)
 
     def _chi2_y(self, mu_y, B, z):
         dy = self.y - _model_linear(mu_y, B, z)
-        if self.y_var.ndim == 3:
-            return jnp.einsum("in,nij,nj->n", dy.T, self._y_Cinv, dy)
+        if self.y_Cinv.ndim == 3:
+            return jnp.einsum("ni,nij,nj->n", dy, self.y_Cinv, dy)
         else:
             return jnp.sum(dy**2 / self.y_var, axis=1)
 
@@ -209,18 +199,20 @@ class LinearLVM:
         # Initialize the means using invvar weighted means
         # TODO: could do sigma-clipping here to be more robust
         if "mu_X" not in state:
-            X_ivar = self._X_Cinv if self._X_Cinv.ndim == 2 else np.diag(self._X_Cinv)
+            X_ivar = self.X_Cinv if self.X_Cinv.ndim == 2 else np.diag(self.X_Cinv)
             state["mu_X"] = np.sum(self.X * X_ivar, axis=0) / np.sum(X_ivar, axis=0)
 
         if "mu_y" not in state:
-            y_ivar = self._y_Cinv if self._y_Cinv.ndim == 2 else np.diag(self._y_Cinv)
+            y_ivar = self.y_Cinv if self.y_Cinv.ndim == 2 else np.diag(self.y_Cinv)
             state["mu_y"] = np.sum(self.y * y_ivar, axis=0) / np.sum(y_ivar, axis=0)
 
         if "z" not in state:
             # First hack: Start with the pseudo-inverse of `B`.
             state["z"] = np.zeros((self.sizes["N"], self.sizes["D"]))
+
+            # TODO: should I do this in a less hacky way?
             y_err = (
-                np.sqrt(np.diag(self.y_var))
+                np.sqrt(1 / np.diag(self.y_var))
                 if self.y_var.ndim == 3
                 else np.sqrt(self.y_var)
             )
@@ -231,6 +223,7 @@ class LinearLVM:
                 )[0].T
 
             # Second hack: Add some noise to unconstrained z components
+            # TODO: I think this is adding noise to the *constrained* z components
             sigma = np.std(state["z"][:, ~self._z_fit_mask], axis=0)
             scale = 0.1  # TODO: MAGIC NUMBER
             state["z"][:, ~self._z_fit_mask] += self.rng.normal(
@@ -245,8 +238,10 @@ class LinearLVM:
 
         if "A" not in state:
             state["A"] = np.zeros((self.sizes["R"], self.sizes["D"]))
+
+            # TODO: should I do this in a less hacky way?
             X_err = (
-                np.sqrt(np.diag(self.X_var))
+                np.sqrt(1 / np.diag(self.X_var))
                 if self.X_var.ndim == 3
                 else np.sqrt(self.X_var)
             )
@@ -273,7 +268,7 @@ class LinearLVM:
 
         return ParameterState(sizes=self.sizes, **state)
 
-    def predict_y(self, X, X_err, par_state=None):
+    def predict_y(self, X, X_Cinv, par_state=None):
         if par_state is None:
             par_state = self.par_state
 
@@ -283,16 +278,15 @@ class LinearLVM:
             raise ValueError("Invalid shape for input feature matrix X")
 
         y_hat = np.zeros((M, self.sizes["Q"]))
-
-        chi = (X - par_state.mu_X[None]) / X_err
-        for i, dx in enumerate(chi):
-            M = par_state.A / X_err[i][:, None]
-            z = np.linalg.lstsq(M, dx, rcond=None)[0]
+        chi = np.einsum("nij,ni->nj", X_Cinv, (X - par_state.mu_X[None]))
+        for i, dX in enumerate(chi):
+            M = X_Cinv[i] @ par_state.A
+            z = np.linalg.lstsq(M, dX, rcond=None)[0]
             y_hat[i] = par_state.mu_y + par_state.B @ z
 
         return y_hat
 
-    def predict_X(self, y, y_err, par_state=None):
+    def predict_X(self, y, y_Cinv, par_state=None):
         if par_state is None:
             par_state = self.par_state
 
@@ -301,10 +295,9 @@ class LinearLVM:
             raise ValueError("Invalid shape for input label array y")
 
         X_hat = np.zeros((M, self.sizes["R"]))
-
-        chi = (y - par_state.mu_y[None]) / y_err
+        chi = np.einsum("nij,ni->nj", y_Cinv, (y - par_state.mu_y[None]))
         for i, dy in enumerate(chi):
-            M = par_state.B / y_err[i][:, None]
+            M = y_Cinv[i] @ par_state.B
             z = np.linalg.lstsq(M, dy, rcond=None)[0]
             X_hat[i] = par_state.mu_X + par_state.A @ z
 
