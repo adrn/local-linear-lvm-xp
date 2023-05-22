@@ -1,3 +1,6 @@
+# Standard library
+import copy
+
 # Third-party
 import numpy as np
 from gala.util import atleast_2d
@@ -200,6 +203,7 @@ class Labels:
     def __init__(self):
         self._vals = {}
         self.plot_labels = {}
+        self._icov_names = []
         self._icov_parts = []
         self._y = None
         self._y_Cinv = None
@@ -237,6 +241,7 @@ class Labels:
             raise ValueError("Invalid shape for input `value` or `var`.")
 
         self._vals[name] = value
+        self._icov_names.append(name)
         self._icov_parts.append(1 / var)
         self.plot_labels[name] = plot_label
         self.Q += 1
@@ -279,6 +284,7 @@ class Labels:
             self._vals[name] = values[:, i]
             self.plot_labels[name] = plot_labels[i]
 
+        self._icov_names.append(names)
         self._icov_parts.append(np.linalg.inv(cov))
         self.Q += len(names)
 
@@ -300,41 +306,66 @@ class Labels:
                 self._percs[name] = np.nanpercentile(val, [50, 16, 84])
 
         if not icov:
-            new_vals = {}
-            for name, perc in self._percs.items():
-                new_vals[name] = (vals[name] - perc[0]) / (perc[2] - perc[1])
+            new_vals = np.zeros_like(vals)
+            for i, (name, perc) in enumerate(self._percs.items()):
+                new_vals[:, i] = (vals[:, i] - perc[0]) / (perc[2] - perc[1])
         else:
             # Scale the inverse variance matrix
             Minv = np.diag([(perc[2] - perc[1]) for perc in self._percs.values()])
-            Cinv = self._make_icov()
-            new_vals = np.einsum("ik,nkl,lj->nij", Minv, Cinv, Minv)
+            new_vals = np.einsum("ik,nkl,lj->nij", Minv, vals, Minv)
 
         return new_vals
 
-    def _untransform(self, ys, icov=False):
+    def _untransform(self, vals, icov=False):
         if self._percs is None:
             self._percs = {}
             for name, val in self.vals.items():
                 self._percs[name] = np.nanpercentile(val, [50, 16, 84])
 
         if not icov:
-            new_vals = {}
+            new_vals = np.zeros_like(vals)
             for i, (name, perc) in enumerate(self._percs.items()):
-                new_vals[name] = ys[:, i] * (perc[2] - perc[1]) + perc[0]
-
+                new_vals[:, i] = vals[:, i] * (perc[2] - perc[1]) + perc[0]
         else:
             # Scale the inverse variance matrix
             Minv = np.diag([1 / (perc[2] - perc[1]) for perc in self._percs.values()])
-            Cinv = self._make_icov()
-            new_vals = np.einsum("ik,nkl,lj->nij", Minv, Cinv, Minv)
+            new_vals = np.einsum("ik,nkl,lj->nij", Minv, vals, Minv)
 
         return new_vals
+
+    def from_transformed(self, y, y_Cinv):
+        lbl = copy.copy(self)
+        new_y = lbl._untransform(y)
+        new_y_Cinv = lbl._untransform(y_Cinv, icov=True)
+
+        i = 0
+        new_vals = {}
+        new_icov_parts = []
+        for name in self._icov_names:
+            if isinstance(name, str):
+                new_vals[name] = new_y[:, i]
+                new_icov_parts.append(new_y_Cinv[:, i, i])
+                i += 1
+            elif isinstance(name, list):
+                K = len(name)
+                new_icov_parts.append(new_y_Cinv[:, i : i + K, i : i + K])
+                for n in name:
+                    new_vals[n] = new_y[:, i]
+                    i += 1
+            else:
+                raise RuntimeError("Invalid state. Ya borked it!")
+
+        lbl._vals = new_vals
+        lbl._icov_parts = new_icov_parts
+        lbl._y = lbl._y_Cinv = None
+        return lbl
 
     @property
     def y(self):
         if self._y is None or self._y.shape[1] != len(self._vals):
-            new_vals = self._transform(self._vals)
-            self._y = np.stack(list(new_vals.values())).T.astype(np.float64)
+            vals = np.stack(list(self._vals.values())).T.astype(np.float64)
+            new_y = self._transform(vals)
+            self._y = new_y.astype(np.float64)
         return self._y
 
     @property
@@ -344,12 +375,15 @@ class Labels:
             self._y_Cinv = new_Cinv.astype(np.float64)
         return self._y_Cinv
 
-    # def __getitem__(self, slc):
-    #     if isinstance(slc, int):
-    #         slc = slice(slc, slc + 1)
+    def __getitem__(self, slc):
+        if isinstance(slc, int):
+            slc = slice(slc, slc + 1)
 
-    #     new_obj = self.__class__()
-    #     for name in self._vals:
-    #         new_obj.add_label(
-    #             name, self.vals[name][slc], self.errs[name][slc], self.plot_labels[name]
-    #         )
+        lbl = copy.deepcopy(self)
+        lbl._y = None
+        lbl._y_Cinv = None
+        for k, v in lbl._vals.items():
+            lbl._vals[k] = v[slc]
+        lbl.N = lbl._vals[k].shape[0]
+        lbl._icov_parts = [part[slc] for part in lbl._icov_parts]
+        return lbl
