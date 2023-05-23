@@ -1,4 +1,5 @@
 # Third-party
+import astropy.table as at
 import numpy as np
 
 __all__ = ["Features", "Labels"]
@@ -174,6 +175,28 @@ class BaseData:
             i += K
 
         return trans_data, trans_icov
+
+    def from_transformed(self, data, icov=None):
+        # expand block array into dict:
+        data_dict = {}
+        icov_dict = {}
+
+        i = 0
+        for name, vals in self._raw_data.items():
+            K = vals.shape[1]
+            data_dict[name] = data[:, i : i + K]
+            if icov is not None:
+                icov_dict[name] = icov[:, i : i + K, i : i + K]
+
+        data_dict = self._transform_data(data_dict, inv=True)
+
+        data_tbl = at.Table(data_dict)
+        if icov is None:
+            return data_tbl
+
+        else:
+            icov_dict = self._transform_icov(icov_dict, inv=True)
+            return data_tbl, at.Table(icov_dict)
 
 
 class Features(BaseData):
