@@ -133,6 +133,8 @@ class BaseData:
         self._raw_data[name] = value
         self._raw_icov[name] = icov
 
+        return self
+
     def __getitem__(self, slc):
         if isinstance(slc, int):
             slc = slice(slc, slc + 1)
@@ -201,7 +203,7 @@ class BaseData:
 
 class Features(BaseData):
     @classmethod
-    def from_gaiadata(cls, g, n_bp=None, n_rp=None, **other_features):
+    def from_gaiadata(cls, g, n_bp=None, n_rp=None):
         """
         TODO: describe in more detail
 
@@ -209,42 +211,36 @@ class Features(BaseData):
         """
 
         if n_bp is None:
-            n_bp = 1000  # arbitrary big number
+            n_bp = 55
         if n_rp is None:
-            n_rp = 1000  # arbitrary big number
+            n_rp = 55
 
-        bp_scale = g.rp[:, 0]  # TODO: HARDCODED
-        rp_scale = g.rp[:, 0]  # TODO: HARDCODED
+        # TODO: scale by phot_g_mean_flux instead so error is uncorrelated!
+        scale = g.rp[:, 0:1]
 
-        n_xp = 0
-        if n_bp == 0:
-            bp = None
-            bp_err = None
-        else:
-            j = min(g.bp.shape[1], n_bp + 1)
-            bp = g.bp[:, 0:j]
-            bp_err = g.bp_err[:, 0:j]
-            n_xp += bp.shape[1]
+        obj = cls()
 
-        if n_rp == 0:
-            rp = None
-            rp_err = None
-        else:
-            j = min(g.rp.shape[1], n_rp)
-            rp = g.rp[:, 1:j]
-            rp_err = g.rp_err[:, 1:j]
-            n_xp += rp.shape[1]
+        if n_bp > 0:
+            j = min(g.bp.shape[1], n_bp)
+            obj.add(
+                "bp",
+                value=g.bp[:, 0:j],
+                err=g.bp_err[:, 0:j],  # TODO: take covariance elements instead
+                scale=scale,
+                plot_label="BP/RP[0]",
+            )
 
-        return cls(
-            bp=bp,
-            bp_err=bp_err,
-            rp=rp,
-            rp_err=rp_err,
-            bp_scale=bp_scale,
-            rp_scale=rp_scale,
-            **other_features,
-            apply_scale=True,
-        )
+        if n_rp > 0:
+            j = min(g.rp.shape[1], n_rp - 1)
+            obj.add(
+                "rp",
+                value=g.rp[:, 1:j],
+                err=g.rp_err[:, 1:j],  # TODO: take covariance elements instead
+                scale=scale,
+                plot_label="RP/RP[0]",
+            )
+
+        return obj
 
     def make_X(self, icov=True):
         return self._make_helper(icov=icov)
