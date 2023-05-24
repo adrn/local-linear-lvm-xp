@@ -40,11 +40,21 @@ class BaseData:
     def _transform_icov(self, vals, inv=False):
         new_vals = {}
         for n, icov in vals.items():
-            if not inv:
-                M = np.diag(self._scales[n])
-            else:
-                M = np.diag(1 / self._scales[n])
-            new_vals[n] = np.einsum("ik,nkl,lj->nij", M, icov, M)
+            s = np.squeeze(self._scales[n])
+            if inv:
+                s = 1 / s
+
+            # TODO: need some good tests of this shit
+            if s.ndim == 0:
+                new_vals[n] = s**2 * icov
+
+            elif s.shape[0] == self.N:
+                new_vals[n] = (s**2 * icov.T).T
+
+            elif s.shape[0] == icov.shape[1]:
+                M = np.diag(s)
+                new_vals[n] = np.einsum("ik,nkl,lj->nij", M, icov, M)
+
         return new_vals
 
     def add(

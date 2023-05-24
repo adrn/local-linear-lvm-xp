@@ -45,8 +45,8 @@ class LinearLVM:
         self,
         X,
         y,
-        X_Cinv,
-        y_Cinv,
+        X_icov,
+        y_icov,
         n_latents,
         alpha,
         beta,
@@ -65,10 +65,10 @@ class LinearLVM:
             shape `(N, R)` array of training features
         y : array-like
             shape `(N, Q)` array of training labels
-        X_Cinv : array-like
+        X_icov : array-like
             shape `(N, R, R)` inverse-variance matrix array, or `(N, R)` array of error
             inverse variances for the features (i.e. NOT THE STANDARD DEVIATIONS)
-        y_Cinv : array-like
+        y_icov : array-like
             shape `(N, Q, Q)` inverse-variance matrix array, or `(N, Q)` array of error
             inverse variances for the labels (i.e. NOT THE STANDARD DEVIATIONS)
         n_latents : int
@@ -85,8 +85,8 @@ class LinearLVM:
 
         self.X = jnp.array(X)
         self.y = jnp.array(y)
-        self.X_Cinv = jnp.array(X_Cinv)
-        self.y_Cinv = jnp.array(y_Cinv)
+        self.X_icov = jnp.array(X_icov)
+        self.y_icov = jnp.array(y_icov)
 
         self.sizes = {}
         self.sizes["N"], self.sizes["R"] = self.X.shape
@@ -105,17 +105,17 @@ class LinearLVM:
         for K, name in zip(["R", "Q"], ["X", "y"]):
             expected_cov_shape = getattr(self, name).shape + (self.sizes[K],)
             val_shape = getattr(self, name).shape
-            err_shape = getattr(self, f"{name}_var").shape
+            err_shape = getattr(self, f"{name}_icov").shape
             if len(err_shape) == 2 and val_shape != err_shape:
                 raise ValueError(
                     shp_msg.format(
-                        object_name=f"{name}_var", got=err_shape, expected=val_shape
+                        object_name=f"{name}_icov", got=err_shape, expected=val_shape
                     )
                 )
             elif len(err_shape) == 3 and err_shape != expected_cov_shape:
                 raise ValueError(
                     shp_msg.format(
-                        object_name=f"{name}_var",
+                        object_name=f"{name}_icov",
                         got=err_shape,
                         expected=expected_cov_shape,
                     )
@@ -123,7 +123,7 @@ class LinearLVM:
             elif len(err_shape) not in [2, 3]:
                 raise ValueError(
                     shp_msg.format(
-                        object_name=f"{name}_var",
+                        object_name=f"{name}_icov",
                         got=err_shape,
                         expected=f"{val_shape} or {expected_cov_shape}",
                     )
@@ -150,17 +150,17 @@ class LinearLVM:
 
     def _chi2_X(self, mu_X, A, z):
         dX = self.X - _model_linear(mu_X, A, z)
-        if self.X_Cinv.ndim == 3:
-            return jnp.einsum("ni,nij,nj->n", dX, self.X_Cinv, dX)
+        if self.X_icov.ndim == 3:
+            return jnp.einsum("ni,nij,nj->n", dX, self.X_icov, dX)
         else:
-            return jnp.sum(dX**2 / self.X_var, axis=1)
+            return jnp.sum(dX**2 * self.X_icov, axis=1)
 
     def _chi2_y(self, mu_y, B, z):
         dy = self.y - _model_linear(mu_y, B, z)
-        if self.y_Cinv.ndim == 3:
-            return jnp.einsum("ni,nij,nj->n", dy, self.y_Cinv, dy)
+        if self.y_icov.ndim == 3:
+            return jnp.einsum("ni,nij,nj->n", dy, self.y_icov, dy)
         else:
-            return jnp.sum(dy**2 / self.y_var, axis=1)
+            return jnp.sum(dy**2 * self.y_icov, axis=1)
 
     def chi2(self, params):
         p = ParameterState(self.sizes, **params)
@@ -199,18 +199,18 @@ class LinearLVM:
         # Initialize the means using invvar weighted means
         # TODO: could do sigma-clipping here to be more robust
         if "mu_X" not in state:
-            X_ivar = self.X_Cinv if self.X_Cinv.ndim == 2 else np.diag(self.X_Cinv)
+            X_ivar = self.X_icov if self.X_icov.ndim == 2 else np.diag(self.X_icov)
             state["mu_X"] = np.sum(self.X * X_ivar, axis=0) / np.sum(X_ivar, axis=0)
 
         if "mu_y" not in state:
-            y_ivar = self.y_Cinv if self.y_Cinv.ndim == 2 else np.diag(self.y_Cinv)
+            y_ivar = self.y_icov if self.y_icov.ndim == 2 else np.diag(self.y_icov)
             state["mu_y"] = np.sum(self.y * y_ivar, axis=0) / np.sum(y_ivar, axis=0)
 
         if "z" not in state:
             # First hack: Start with the pseudo-inverse of `B`.
             state["z"] = np.zeros((self.sizes["N"], self.sizes["D"]))
 
-            # TODO: should I do this in a less hacky way?
+            # TODO: assume icov comes in
             y_err = (
                 np.sqrt(1 / np.diag(self.y_var))
                 if self.y_var.ndim == 3
@@ -268,7 +268,7 @@ class LinearLVM:
 
         return ParameterState(sizes=self.sizes, **state)
 
-    def predict_y(self, X, X_Cinv, par_state=None):
+    def predict_y(self, X, X_icov, par_state=None):
         if par_state is None:
             par_state = self.par_state
 
@@ -278,15 +278,15 @@ class LinearLVM:
             raise ValueError("Invalid shape for input feature matrix X")
 
         y_hat = np.zeros((M, self.sizes["Q"]))
-        chi = np.einsum("nij,ni->nj", X_Cinv, (X - par_state.mu_X[None]))
+        chi = np.einsum("nij,ni->nj", X_icov, (X - par_state.mu_X[None]))
         for i, dX in enumerate(chi):
-            M = X_Cinv[i] @ par_state.A
+            M = X_icov[i] @ par_state.A
             z = np.linalg.lstsq(M, dX, rcond=None)[0]
             y_hat[i] = par_state.mu_y + par_state.B @ z
 
         return y_hat
 
-    def predict_X(self, y, y_Cinv, par_state=None):
+    def predict_X(self, y, y_icov, par_state=None):
         if par_state is None:
             par_state = self.par_state
 
@@ -295,9 +295,9 @@ class LinearLVM:
             raise ValueError("Invalid shape for input label array y")
 
         X_hat = np.zeros((M, self.sizes["R"]))
-        chi = np.einsum("nij,ni->nj", y_Cinv, (y - par_state.mu_y[None]))
+        chi = np.einsum("nij,ni->nj", y_icov, (y - par_state.mu_y[None]))
         for i, dy in enumerate(chi):
-            M = y_Cinv[i] @ par_state.B
+            M = y_icov[i] @ par_state.B
             z = np.linalg.lstsq(M, dy, rcond=None)[0]
             X_hat[i] = par_state.mu_X + par_state.A @ z
 
