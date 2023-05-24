@@ -31,8 +31,8 @@ class ParameterState:
             got_shape = getattr(self, name).shape
             if got_shape != shape:
                 raise ValueError(
-                    f"Invalid shape for {name}: expected {runtime_shape}={shape}, "
-                    f"got {got_shape}"
+                    f"Invalid shape for {name}: expected {runtime_shape}={shape}, got "
+                    f"{got_shape}"
                 )
 
     @property
@@ -45,20 +45,19 @@ class LinearLVM:
         self,
         X,
         y,
-        X_err,
-        y_err,
+        X_icov,
+        y_icov,
         n_latents,
         alpha,
         beta,
-        B_fit_idx_cols=None,
         verbose=False,
         rng=None,
     ):
         """
-        N - stars
-        R - features
-        Q - labels
-        D - latents
+        N - number of stars
+        R - XP spectra (BP/RP spectral coefficients, photometry, etc.), aka "features"
+        Q - stellar parameters (Teff, logg, [Fe/H], [alpha/Fe], etc.), aka "labels"
+        D - number of latent variables in the model
 
         Parameters
         ----------
@@ -66,18 +65,18 @@ class LinearLVM:
             shape `(N, R)` array of training features
         y : array-like
             shape `(N, Q)` array of training labels
-        X_err : array-like
-            shape `(N, R)` array of errors (standard deviations) for the features
-        y_err : array-like
-            shape `(N, Q)` array of errors (standard deviations) for the labels
+        X_icov : array-like
+            shape `(N, R, R)` inverse-variance matrix array, or `(N, R)` array of error
+            inverse variances for the features (i.e. NOT THE STANDARD DEVIATIONS)
+        y_icov : array-like
+            shape `(N, Q, Q)` inverse-variance matrix array, or `(N, Q)` array of error
+            inverse variances for the labels (i.e. NOT THE STANDARD DEVIATIONS)
         n_latents : int
             sets the number of latent variables, i.e., `D` in the definitions above
         alpha : numeric
-            regularization strength for latents `z`
+            regularization strength for elements of matrix `A`
         beta : numeric
-            regularization strength for unconstrained parts of matrix `A`
-        B_fit_idx_cols : array-like
-            array of indices of columns in `B` to leave unconstrained (i.e. to fit for)
+            regularization strength for unconstrained parts of matrix `B`
         """
         self.verbose = verbose
         if rng is None:
@@ -86,55 +85,61 @@ class LinearLVM:
 
         self.X = jnp.array(X)
         self.y = jnp.array(y)
-        self.X_err = jnp.array(X_err)
-        self.y_err = jnp.array(y_err)
+        self.X_icov = jnp.array(X_icov)
+        self.y_icov = jnp.array(y_icov)
 
         self.sizes = {}
         self.sizes["N"], self.sizes["R"] = self.X.shape
         self.sizes["Q"] = self.y.shape[1]
 
         shp_msg = "Invalid shape for {object_name}: got {got}, expected {expected})"
-        if self.y.shape[0] != self.sizes["N"]:
-            shp_msg.format(
-                object_name="training labels y",
-                got=self.y.shape[0],
-                expected=self.sizes["N"],
-            )
-        if self.X_err.shape != self.X.shape:
-            shp_msg.format(
-                object_name="X_err", got=self.X_err.shape, expected=self.X.shape
-            )
-        if self.y_err.shape != self.y.shape:
-            shp_msg.format(
-                object_name="y_err", got=self.y_err.shape, expected=self.y.shape
+        if self.X.shape[0] != self.y.shape[0]:
+            raise ValueError(
+                shp_msg.format(
+                    object_name="training labels y",
+                    got=self.y.shape[0],
+                    expected=self.X.shape[0],
+                )
             )
 
-        self._X_ivar = 1 / self.X_err**2
-        self._y_ivar = 1 / self.y_err**2
+        for K, name in zip(["R", "Q"], ["X", "y"]):
+            expected_cov_shape = getattr(self, name).shape + (self.sizes[K],)
+            val_shape = getattr(self, name).shape
+            err_shape = getattr(self, f"{name}_icov").shape
+            if len(err_shape) == 2 and val_shape != err_shape:
+                raise ValueError(
+                    shp_msg.format(
+                        object_name=f"{name}_icov", got=err_shape, expected=val_shape
+                    )
+                )
+            elif len(err_shape) == 3 and err_shape != expected_cov_shape:
+                raise ValueError(
+                    shp_msg.format(
+                        object_name=f"{name}_icov",
+                        got=err_shape,
+                        expected=expected_cov_shape,
+                    )
+                )
+            elif len(err_shape) not in [2, 3]:
+                raise ValueError(
+                    shp_msg.format(
+                        object_name=f"{name}_icov",
+                        got=err_shape,
+                        expected=f"{val_shape} or {expected_cov_shape}",
+                    )
+                )
 
-        # B turned into a Jax array below
+        # First square block of B is the identity matrix, so some latents are
+        # semi-interpretable:
+        # (B turned into a Jax array below)
         self.sizes["D"] = int(n_latents)
         B = np.zeros((self.sizes["Q"], self.sizes["D"]))
         B[: self.sizes["Q"], : self.sizes["Q"]] = np.eye(self.sizes["Q"])
+        self._z_fit_mask = np.arange(self.sizes["Q"], self.sizes["D"])
 
-        # Elements of B that we will fit for:
-        if B_fit_idx_cols is None:
-            B_fit_idx_cols = np.array([], dtype=int)
-        self._B_fit_idx_cols = B_fit_idx_cols
-        B[:, self._B_fit_idx_cols] = 0.0
-
-        self._B = B
+        self._B_init = B
         if verbose:
             print(f"B = {B}")
-            print(f"B fit elements = {self._B_fit_idx_cols}")
-
-        # Now assess which latents to fit:
-        self._z_fit_mask = jnp.all(self._B == 0, axis=0)
-        if verbose:
-            print(
-                f"using {self._z_fit_mask.sum()} unconstrained elements of z, "
-                f"out of {self.sizes['D']} latents"
-            )
 
         self.alpha = float(alpha)
         self.beta = float(beta)
@@ -142,6 +147,39 @@ class LinearLVM:
             raise ValueError("You must regularize positively.")
 
         self.par_state = self.initialize_par_state()
+
+    def _chi2_X(self, mu_X, A, z):
+        dX = self.X - _model_linear(mu_X, A, z)
+        if self.X_icov.ndim == 3:
+            return jnp.einsum("ni,nij,nj->n", dX, self.X_icov, dX)
+        else:
+            return jnp.sum(dX**2 * self.X_icov, axis=1)
+
+    def _chi2_y(self, mu_y, B, z):
+        dy = self.y - _model_linear(mu_y, B, z)
+        if self.y_icov.ndim == 3:
+            return jnp.einsum("ni,nij,nj->n", dy, self.y_icov, dy)
+        else:
+            return jnp.sum(dy**2 * self.y_icov, axis=1)
+
+    def chi2(self, params):
+        p = ParameterState(self.sizes, **params)
+        chi2 = (
+            self._chi2_X(p.mu_X, p.A, p.z)
+            + self._chi2_y(p.mu_y, p.B, p.z)
+            + self.alpha * jnp.sum(p.A**2)
+            + self.beta * jnp.sum(p.B[:, self._z_fit_mask] ** 2)
+        )
+        return chi2
+
+    def chi(self, params):
+        return jnp.sqrt(self.chi2(params))
+
+    def objective(self, params):
+        return 0.5 * jnp.sum(self.chi2(params))
+
+    def __call__(self, params):
+        return self.objective(params)
 
     def initialize_par_state(self, **state):
         """
@@ -161,27 +199,33 @@ class LinearLVM:
         # Initialize the means using invvar weighted means
         # TODO: could do sigma-clipping here to be more robust
         if "mu_X" not in state:
-            state["mu_X"] = np.sum(self.X * self._X_ivar, axis=0) / np.sum(
-                self._X_ivar, axis=0
-            )
+            X_ivar = self.X_icov if self.X_icov.ndim == 2 else np.diag(self.X_icov)
+            state["mu_X"] = np.sum(self.X * X_ivar, axis=0) / np.sum(X_ivar, axis=0)
 
         if "mu_y" not in state:
-            state["mu_y"] = np.sum(self.y * self._y_ivar, axis=0) / np.sum(
-                self._y_ivar, axis=0
-            )
+            y_ivar = self.y_icov if self.y_icov.ndim == 2 else np.diag(self.y_icov)
+            state["mu_y"] = np.sum(self.y * y_ivar, axis=0) / np.sum(y_ivar, axis=0)
 
         if "z" not in state:
             # First hack: Start with the pseudo-inverse of `B`.
             state["z"] = np.zeros((self.sizes["N"], self.sizes["D"]))
-            chi = (self.y - state["mu_y"][None]) / self.y_err
+
+            # TODO: assume icov comes in
+            y_err = (
+                np.sqrt(1 / np.diag(self.y_var))
+                if self.y_var.ndim == 3
+                else np.sqrt(self.y_var)
+            )
+            chi = (self.y - state["mu_y"][None]) / y_err
             for n in range(self.sizes["N"]):
                 state["z"][n] = np.linalg.lstsq(
-                    self._B / self.y_err[n][:, None], chi[n], rcond=None
+                    self._B_init / self.y_err[n][:, None], chi[n], rcond=None
                 )[0].T
 
             # Second hack: Add some noise to unconstrained z components
+            # TODO: I think this is adding noise to the *constrained* z components
             sigma = np.std(state["z"][:, ~self._z_fit_mask], axis=0)
-            scale = 0.1  # MAGIC NUMBER
+            scale = 0.1  # TODO: MAGIC NUMBER
             state["z"][:, ~self._z_fit_mask] += self.rng.normal(
                 0, scale * sigma, size=(self.sizes["N"], (~self._z_fit_mask).sum())
             )
@@ -194,11 +238,17 @@ class LinearLVM:
 
         if "A" not in state:
             state["A"] = np.zeros((self.sizes["R"], self.sizes["D"]))
-            chi = self._chi_X(state["mu_X"], state["A"], state["z"])
 
+            # TODO: should I do this in a less hacky way?
+            X_err = (
+                np.sqrt(1 / np.diag(self.X_var))
+                if self.X_var.ndim == 3
+                else np.sqrt(self.X_var)
+            )
+            chi = (self.X - state["mu_X"][None]) / X_err
             for r in range(self.sizes["R"]):
                 state["A"][r] = np.linalg.lstsq(
-                    state["z"] / self.X_err[:, r : r + 1], chi[:, r], rcond=None
+                    state["z"] / X_err[:, r : r + 1], chi[:, r], rcond=None
                 )[0]
 
         renorm = np.sqrt(np.sum(state["A"][:, self._z_fit_mask] ** 2, axis=0))
@@ -210,52 +260,15 @@ class LinearLVM:
         )
 
         if "B" not in state:
-            state["B"] = self._B.copy()
-            chi = self._chi_y(state["mu_y"], state["B"], state["z"])
+            state["B"] = self._B_init.copy()
+            chi = np.sqrt(self._chi2_y(state["mu_y"], state["B"], state["z"]))
 
             for i in self._B_fit_idx_cols:
                 state["B"][:, i] = np.linalg.lstsq(state["z"], chi[:, i], rcond=None)[0]
 
         return ParameterState(sizes=self.sizes, **state)
 
-    def _chi_X(self, mu_X, A, z):
-        return (self.X - _model_linear(mu_X, A, z)) / self.X_err
-
-    def _chi_y(self, mu_y, B, z):
-        return (self.y - _model_linear(mu_y, B, z)) / self.y_err
-
-    def chi(self, params):
-        p = ParameterState(self.sizes, **params)
-        chi2_X = jnp.sum(self._chi_X(p.mu_X, p.A, p.z) ** 2, axis=1)
-        chi2_y = jnp.sum(self._chi_y(p.mu_y, p.B, p.z) ** 2, axis=1)
-        chi2 = (
-            chi2_X
-            + chi2_y
-            + self.alpha / self.sizes["N"] * jnp.sum(p.z[:, self._z_fit_mask] ** 2)
-            + self.beta / self.sizes["N"] * jnp.sum(p.A[:, self._z_fit_mask] ** 2)
-        )
-        return jnp.sqrt(chi2)
-
-    def objective(self, params):
-        """
-        TODO: Regularization term is totally wrong.
-        """
-        return 0.5 * jnp.sum(self.chi(params) ** 2)
-        # p = ParameterState(self.sizes, **params)
-        # chi_X = self._chi_X(p.mu_X, p.A, p.z)
-        # chi_y = self._chi_y(p.mu_y, p.B, p.z)
-
-        # return 0.5 * (
-        #     jnp.sum(chi_X**2)
-        #     + jnp.sum(chi_y**2)
-        #     + self.alpha * jnp.sum(p.z[:, self._z_fit_mask] ** 2)
-        #     + self.beta * jnp.sum(p.A[:, self._z_fit_mask] ** 2)
-        # )
-
-    def __call__(self, params):
-        return self.objective(params)
-
-    def predict_y(self, X, X_err, par_state=None):
+    def predict_y(self, X, X_icov, par_state=None):
         if par_state is None:
             par_state = self.par_state
 
@@ -265,16 +278,15 @@ class LinearLVM:
             raise ValueError("Invalid shape for input feature matrix X")
 
         y_hat = np.zeros((M, self.sizes["Q"]))
-
-        chi = (X - par_state.mu_X[None]) / X_err
-        for i, dx in enumerate(chi):
-            M = par_state.A / X_err[i][:, None]
-            z = np.linalg.lstsq(M, dx, rcond=None)[0]
+        chi = np.einsum("nij,ni->nj", X_icov, (X - par_state.mu_X[None]))
+        for i, dX in enumerate(chi):
+            M = X_icov[i] @ par_state.A
+            z = np.linalg.lstsq(M, dX, rcond=None)[0]
             y_hat[i] = par_state.mu_y + par_state.B @ z
 
         return y_hat
 
-    def predict_X(self, y, y_err, par_state=None):
+    def predict_X(self, y, y_icov, par_state=None):
         if par_state is None:
             par_state = self.par_state
 
@@ -283,10 +295,9 @@ class LinearLVM:
             raise ValueError("Invalid shape for input label array y")
 
         X_hat = np.zeros((M, self.sizes["R"]))
-
-        chi = (y - par_state.mu_y[None]) / y_err
+        chi = np.einsum("nij,ni->nj", y_icov, (y - par_state.mu_y[None]))
         for i, dy in enumerate(chi):
-            M = par_state.B / y_err[i][:, None]
+            M = y_icov[i] @ par_state.B
             z = np.linalg.lstsq(M, dy, rcond=None)[0]
             X_hat[i] = par_state.mu_X + par_state.A @ z
 

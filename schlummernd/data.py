@@ -1,95 +1,219 @@
 # Third-party
+import astropy.table as at
 import numpy as np
-from gala.util import atleast_2d
 
 __all__ = ["Features", "Labels"]
 
 
-class Features:
-    """
-    TODO: currently ignoring uncertainties. In principle, we should also keep track of
-    covariance matrices or at least variances for the features.
+class BaseData:
+    def __init__(self):
+        # raw data as inputted:
+        self._raw_data = {}
+        self._raw_icov = {}
 
-    TODO: really need to support not dividing by RP[0] in the future...
-    """
+        # value percentiles used to scale the input values below
+        self._scales = {}
+        self._offsets = {}
 
-    def __init__(
+        # number of stars
+        self.N = None
+
+        # TODO: how to handle plot labels?
+        self.plot_labels = {}
+
+    def __len__(self):
+        return self.N
+
+    @property
+    def names(self):
+        return list(self._raw_data.keys())
+
+    def _transform_data(self, vals, inv=False):
+        new_vals = {}
+        for n, v in vals.items():
+            if not inv:
+                new_vals[n] = (v - self._offsets[n]) / self._scales[n]
+            else:
+                new_vals[n] = v * self._scales[n] + self._offsets[n]
+        return new_vals
+
+    def _transform_icov(self, vals, inv=False):
+        new_vals = {}
+        for n, icov in vals.items():
+            s = np.squeeze(self._scales[n])
+            if inv:
+                s = 1 / s
+
+            # TODO: need some good tests of this shit
+            if s.ndim == 0:
+                new_vals[n] = s**2 * icov
+
+            elif s.shape[0] == self.N:
+                new_vals[n] = (s**2 * icov.T).T
+
+            elif s.shape[0] == icov.shape[1]:
+                M = np.diag(s)
+                new_vals[n] = np.einsum("ik,nkl,lj->nij", M, icov, M)
+
+        return new_vals
+
+    def add(
         self,
-        bp=None,
-        bp_err=None,
-        bp_scale=1.0,
-        rp=None,
-        rp_err=None,
-        rp_scale=1.0,
-        apply_scale=False,
-        **other_features,
+        name,
+        value,
+        err=None,
+        cov=None,
+        icov=None,
+        scale=None,
+        offset=None,
+        plot_label=None,
     ):
-        # TODO: This interface sucks, with the scales and shit. Also it doesn't error
-        # propagate the uncertainty on the scale factor (typically rp[0])
-        if bp is None:
-            bp = []
-            bp_err = []
-        self.bp_scale = np.array(bp_scale)
-        self.bp = np.asarray(atleast_2d(bp, insert_axis=1))
-        if self.bp_scale.shape == ():
-            self.bp_scale = np.full_like(self.bp, self.bp_scale)
-        elif self.bp_scale.ndim != 2 and self.bp_scale.shape[0] == self.bp.shape[0]:
-            self.bp_scale = self.bp_scale[:, None]
-        self.bp_err = np.asarray(atleast_2d(bp_err, insert_axis=1))
-        if apply_scale:
-            self.bp = self.bp / self.bp_scale
-            self.bp_err = self.bp_err / self.bp_scale
+        """
+        Pass data values with `value` and either pass in errors (stddev) with `err`, a
+        covariance matrix or variance values with `cov`, or inverse-variance matrix with
+        `icov`.
 
-        if rp is None:
-            rp = []
-            rp_err = []
-        self.rp_scale = np.array(rp_scale)
-        self.rp = np.asarray(atleast_2d(rp, insert_axis=1))
-        if self.rp_scale.shape == ():
-            self.rp_scale = np.full_like(self.rp, self.rp_scale)
-        elif self.rp_scale.ndim != 2 and self.rp_scale.shape[0] == self.rp.shape[0]:
-            self.rp_scale = self.rp_scale[:, None]
-        self.rp_err = np.asarray(atleast_2d(rp_err, insert_axis=1))
-        if apply_scale:
-            self.rp = self.rp / self.rp_scale
-            self.rp_err = self.rp_err / self.rp_scale
+        Parameters
+        ----------
+        name : str
+            The name of the feature or label
+        value : array-like
+            The data values as a numpy array or other data container
+        err : array-like (optional)
+            Array of standard deviations / errors. Only pass one of err, cov, icov.
+        cov : array-like (optional)
+            Array of variances or array of covariance matrices. Only pass one of err,
+            cov, icov.
+        icov : array-like (optional)
+            Array of inverse variances or array of inverse-variance matrices. Only pass
+            one of err, cov, icov.
+        scale : numeric, array-like (optional)
+            Either a single value, or an array of scale values per feature/label.
+            Default is to take the 84th-16th percentile values for each feature/label.
+        offset : numeric, array-like (optional)
+            Either a single value, or an array of offset values per feature/label.
+            Default is to take the median values for each feature/label.
+        """
+        name = str(name)
+        value = np.array(value)
+        if value.ndim > 2:
+            raise ValueError("Invalid shape for input `value`")
+        elif value.ndim == 1:
+            value = value.reshape(-1, 1)
+        N, P = value.shape
 
-        word = " scaled" if not np.all(np.atleast_1d(self.bp_scale) == 1.0) else ""
-        self._bp_names = np.array(
-            [f"BP[{i}]{word}" for i in range(1, self.bp.shape[1] + 1)]
-        )
-        word = " scaled" if not np.all(np.atleast_1d(self.rp_scale) == 1.0) else ""
-        self._rp_names = np.array(
-            [f"RP[{i}]{word}" for i in range(1, self.rp.shape[1] + 1)]
-        )
+        if self.N is None:
+            self.N = N
+        if self.N != N:
+            raise ValueError(
+                f"Number of data points for input data {N} does not match shape of "
+                f"existing data {self.N}"
+            )
 
-        self._features = {}
-        self._features_err = {}
-        for k, v in other_features.items():
-            self._features[k] = np.asarray(v[0])
-            self._features_err[k] = np.asarray(v[1])
+        if scale is None:
+            tmp = np.nanpercentile(value, [16, 84], axis=0)
+            scale = tmp[1] - tmp[0]
+        self._scales[name] = scale
 
-        # HACK: assumption that in the neighborhoods, we only use coeffs
-        self.X_tree = np.hstack((self.bp, self.rp))
+        if offset is None:
+            offset = np.nanpercentile(value, 50, axis=0)
+        self._offsets[name] = offset
 
-        X = np.hstack(
-            [self.bp, self.rp]
-            + [atleast_2d(x, insert_axis=1) for x in self._features.values()]
-        )
-        self.X = X
+        if plot_label is None:
+            plot_label = name
+        self.plot_labels[name] = plot_label
 
-        Xerr = np.hstack(
-            [self.bp_err, self.rp_err]
-            + [atleast_2d(x, insert_axis=1) for x in self._features_err.values()]
-        )
-        self.X_err = Xerr
+        # First, validate that only one of [err, cov, icov] passed in:
+        n_passed = sum([x is None for x in [err, cov, icov]])
+        if n_passed < 2:
+            raise ValueError(
+                "Only one of `err`, `cov`, or `icov` can be passed in at the same time"
+            )
 
-        self.names = np.concatenate(
-            (self._bp_names, self._rp_names, list(self._features.keys()))
-        )
+        if err is not None:
+            # TODO: this should really be a sparse matrix!
+            icov = np.zeros((N, P, P))
+            err = np.array(err).reshape((N, P))
+            icov[:, np.arange(P), np.arange(P)] = 1 / err[:, np.arange(P)] ** 2
+        elif cov is not None:
+            icov = np.linalg.inv(cov).reshape((N, P, P))
+        else:
+            icov = np.array(icov).reshape((N, P, P))
 
+        self._raw_data[name] = value
+        self._raw_icov[name] = icov
+
+        return self
+
+    def __getitem__(self, slc):
+        if isinstance(slc, int):
+            slc = slice(slc, slc + 1)
+
+        elif isinstance(slc, str):
+            return np.squeeze(self._raw_data[slc])
+
+        obj = self.__class__()
+        for name in self.names:
+            new_data = self._raw_data[name][slc]
+            new_icov = self._raw_icov[name][slc]
+            obj.add(
+                name=name,
+                value=new_data,
+                icov=new_icov,
+                plot_label=self.plot_labels[name],
+            )
+
+        return obj
+
+    def _make_helper(self, icov=True):
+        """
+        Helper to create transformed data blocks
+        """
+        trans_data = self._transform_data(self._raw_data)
+        trans_data = np.hstack(list(trans_data.values()))
+
+        if not icov:
+            return trans_data
+
+        # TODO: should use sparse matrices
+        tmp = self._transform_icov(self._raw_icov)
+        full_K = sum([v.shape[1] for v in tmp.values()])
+
+        trans_icov = np.zeros((self.N, full_K, full_K))
+        i = 0
+        for icov in tmp.values():
+            K = icov.shape[1]
+            trans_icov[:, i : i + K, i : i + K] = icov
+            i += K
+
+        return trans_data, trans_icov
+
+    def from_transformed(self, data, icov=None):
+        # expand block array into dict:
+        data_dict = {}
+        icov_dict = {}
+
+        i = 0
+        for name, vals in self._raw_data.items():
+            K = vals.shape[1]
+            data_dict[name] = data[:, i : i + K]
+            if icov is not None:
+                icov_dict[name] = icov[:, i : i + K, i : i + K]
+
+        data_dict = self._transform_data(data_dict, inv=True)
+
+        data_tbl = at.Table(data_dict)
+        if icov is None:
+            return data_tbl
+
+        else:
+            icov_dict = self._transform_icov(icov_dict, inv=True)
+            return data_tbl, at.Table(icov_dict)
+
+
+class Features(BaseData):
     @classmethod
-    def from_gaiadata(cls, g, n_bp=None, n_rp=None, **other_features):
+    def from_gaiadata(cls, g, n_bp=None, n_rp=None):
         """
         TODO: describe in more detail
 
@@ -97,184 +221,66 @@ class Features:
         """
 
         if n_bp is None:
-            n_bp = 1000  # arbitrary big number
+            n_bp = 55
         if n_rp is None:
-            n_rp = 1000  # arbitrary big number
+            n_rp = 55
 
-        bp_scale = g.rp[:, 0]  # TODO: HARDCODED
-        rp_scale = g.rp[:, 0]  # TODO: HARDCODED
+        # TODO: scale by phot_g_mean_flux instead so error is uncorrelated!
+        scale = g.rp[:, 0:1]
 
-        n_xp = 0
-        if n_bp == 0:
-            bp = None
-            bp_err = None
-        else:
-            j = min(g.bp.shape[1], n_bp + 1)
-            bp = g.bp[:, 0:j]
-            bp_err = g.bp_err[:, 0:j]
-            n_xp += bp.shape[1]
+        obj = cls()
 
-        if n_rp == 0:
-            rp = None
-            rp_err = None
-        else:
-            j = min(g.rp.shape[1], n_rp)
-            rp = g.rp[:, 1:j]
-            rp_err = g.rp_err[:, 1:j]
-            n_xp += rp.shape[1]
-
-        return cls(
-            bp=bp,
-            bp_err=bp_err,
-            rp=rp,
-            rp_err=rp_err,
-            bp_scale=bp_scale,
-            rp_scale=rp_scale,
-            **other_features,
-            apply_scale=True,
-        )
-
-    def slice_bp(self, K):
-        return self.__class__(
-            self.bp[:, :K],
-            self.bp_err[:, :K],
-            self.bp_scale,
-            self.rp,
-            self.rp_err,
-            self.rp_scale,
-            **{k: (self._features[k], self._features_err[k]) for k in self._features},
-            apply_scale=False,
-        )
-
-    def slice_rp(self, K):
-        return self.__class__(
-            self.bp,
-            self.bp_err,
-            self.bp_scale,
-            self.rp[:, :K],
-            self.rp_err[:, :K],
-            self.rp_scale,
-            **{k: (self._features[k], self._features_err[k]) for k in self._features},
-            apply_scale=False,
-        )
-
-    def __len__(self):
-        return self.X.shape[0]
-
-    def __getitem__(self, slc):
-        if isinstance(slc, int):
-            slc = slice(slc, slc + 1)
-
-        return self.__class__(
-            bp=self.bp[slc],
-            bp_err=self.bp_err[slc],
-            bp_scale=self.bp_scale[slc],
-            rp=self.rp[slc],
-            rp_err=self.rp_err[slc],
-            rp_scale=self.rp_scale[slc],
-            **{
-                k: (self._features[k][slc], self._features_err[k][slc])
-                for k in self._features
-            },
-            apply_scale=False,
-        )
-
-    def X_to_features(self, X):
-        features = {}
-
-        i = 0
-        if self.bp is not None:
-            features["bp"] = X[:, i : i + self.bp.shape[1]] * self.bp_scale
-            i += self.bp.shape[1]
-
-        if self.rp is not None:
-            features["rp"] = X[:, i : i + self.rp.shape[1]] * self.rp_scale
-            i += self.rp.shape[1]
-
-        print(i)
-        for j, name in enumerate(self._features.keys(), start=i):
-            features[name] = X[:, j]
-
-        return features
-
-
-class Labels:
-    def __init__(self):
-        self.vals = {}
-        self.errs = {}
-        self.labels = {}
-        self._shape = None
-        self._percs = None
-        self._y = None
-        self._y_err = None
-
-    def add_label(self, name, value, err, label=None):
-        if label is None:
-            label = name
-
-        value = np.array(value)
-        err = np.array(err)
-
-        if len(self.vals) == 0:
-            self._shape = value.shape
-
-        if value.shape != self._shape or err.shape != self._shape:
-            raise ValueError("Invalid shape.")
-
-        self.vals[name] = value
-        self.errs[name] = err
-        self.labels[name] = label
-
-    def _transform(self, vals, err=False):
-        if self._percs is None:
-            self._percs = {}
-            for name, val in self.vals.items():
-                self._percs[name] = np.nanpercentile(val, [16, 50, 84])
-
-        new_vals = {}
-        for name, perc in self._percs.items():
-            scale = perc[2] - perc[0]
-            new_vals[name] = vals[name] / scale
-            if not err:
-                new_vals[name] = new_vals[name] - perc[1] / scale
-
-        return new_vals
-
-    def _untransform(self, ys, err=False):
-        if self._percs is None:
-            self._percs = {}
-            for name, val in self.vals.items():
-                self._percs[name] = np.nanpercentile(val, [16, 50, 84])
-
-        new_vals = {}
-        for i, (name, perc) in enumerate(self._percs.items()):
-            scale = perc[2] - perc[0]
-            new_vals[name] = ys[:, i] * scale
-            if not err:
-                new_vals[name] = new_vals[name] + perc[1]
-
-        return new_vals
-
-    @property
-    def y(self):
-        if self._y is None or self._y.shape[1] != len(self.vals):
-            new_vals = self._transform(self.vals)
-            self._y = np.stack(list(new_vals.values())).T.astype(np.float64)
-        return self._y
-
-    @property
-    def y_err(self):
-        if self._y_err is None or self._y_err.shape[1] != len(self.vals):
-            new_errs = self._transform(self.errs, err=True)
-            self._y_err = np.abs(np.stack(list(new_errs.values())).T).astype(np.float64)
-        return self._y_err
-
-    def __getitem__(self, slc):
-        if isinstance(slc, int):
-            slc = slice(slc, slc + 1)
-
-        new_obj = self.__class__()
-        for name in self._ys:
-            new_obj.add_label(
-                name, self.vals[name][slc], self.errs[name][slc], self.labels[name]
+        if n_bp > 0:
+            j = min(g.bp.shape[1], n_bp)
+            obj.add(
+                "bp",
+                value=g.bp[:, 0:j],
+                err=g.bp_err[:, 0:j],  # TODO: take covariance elements instead
+                scale=scale,
+                plot_label="BP/RP[0]",
             )
+
+        if n_rp > 0:
+            j = min(g.rp.shape[1], n_rp - 1)
+            obj.add(
+                "rp",
+                value=g.rp[:, 1:j],
+                err=g.rp_err[:, 1:j],  # TODO: take covariance elements instead
+                scale=scale,
+                plot_label="RP/RP[0]",
+            )
+
+        return obj
+
+    def make_X(self, icov=True):
+        return self._make_helper(icov=icov)
+
+    # TODO: still need these?
+    # def slice_bp(self, K):
+    #     return self.__class__(
+    #         self.bp[:, :K],
+    #         self.bp_err[:, :K],
+    #         self.bp_scale,
+    #         self.rp,
+    #         self.rp_err,
+    #         self.rp_scale,
+    #         **{k: (self._features[k], self._features_err[k]) for k in self._features},
+    #         apply_scale=False,
+    #     )
+
+    # def slice_rp(self, K):
+    #     return self.__class__(
+    #         self.bp,
+    #         self.bp_err,
+    #         self.bp_scale,
+    #         self.rp[:, :K],
+    #         self.rp_err[:, :K],
+    #         self.rp_scale,
+    #         **{k: (self._features[k], self._features_err[k]) for k in self._features},
+    #         apply_scale=False,
+    #     )
+
+
+class Labels(BaseData):
+    def make_y(self, icov=True):
+        return self._make_helper(icov=icov)
